@@ -19,12 +19,12 @@ const WORKFLOW = /^nlc-node[^/]*\.yml$/;
 const TEXT = /\.(?:cjs|js|mjs|json|ps1|nsi|swift|sh|cpp|plist|md|txt|css|html|yml)$/;
 const FORBIDDEN = [
   [/require\(['"](?:\.\.\/)*(?:mcp-gateway|ui)\//, 'imports the NLC app'],
-  [/\/root\/nlc|\/root\/\.|nexlevelclaw\.tech|nexlevelcode\.com\/(?!node)/i, 'names an NLC server or customer address'],
+  [new RegExp('\\/ro' + 'ot\\/|nexlevel' + 'claw\\.tech|nexlevel' + 'code\\.com\\/(?!node)', 'i'), 'names an NLC server or customer address'],
   [/-----BEGIN [A-Z ]*PRIVATE KEY-----/, 'holds a private key'],
   [new RegExp(`\\b(?:${['fe' + 'lix', 'co' + 'co', 'ni' + 'ka', 'jan' + 'sen'].join('|')})\\b`, 'i'), 'names a person or customer'],
   [/\bghp_[A-Za-z0-9]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}|\bsk-[A-Za-z0-9]{20,}|\bAKIA[0-9A-Z]{16}\b|\bxox[bp]-[A-Za-z0-9-]{10,}/, 'holds a token'],
   [/(?:password|secret|api[_-]?key)\s*[:=]\s*['"][A-Za-z0-9+/_-]{12,}['"]/i, 'holds a credential'],
-  [/[A-Za-z0-9._%+-]+@(?!example\.)[A-Za-z0-9-]+\.[A-Za-z]{2,}/, 'holds an email address'],
+  [/[A-Za-z0-9._%+-]+@(?!example\.|users\.noreply\.github\.com)[A-Za-z0-9-]+\.[A-Za-z]{2,}/, 'holds an email address'],
 ];
 
 function walk(dir) {

@@ -11,7 +11,31 @@ function protectedReleaseCredential(environment = process.env) {
   return true;
 }
 
-async function publishVerifiedRelease({ manifest, sourceArtifactDirectory, authorityProvider }) {
+// After a release is published, the public NLC Node repository is rebuilt from that release's own source and handed to the
+// protected public-source adapter (see public-source-github.cjs), so github.com/getnlc/nlc-node always matches the newest release.
+// A refresh that fails never undoes the release: it is reported in the result so the caller sees the repository is stale.
+async function refreshPublicSource({ publicSource, manifest }) {
+  const { sourceRoot, adapterProvider, downloads, sourceUrl } = publicSource;
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { buildPublicRepo } = require('./build-public-repo.cjs');
+  const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'nlc-node-public-')), 'repo');
+  try {
+    if (typeof adapterProvider !== 'function') throw new Error('no protected public-source adapter is configured');
+    const adapter = await adapterProvider();
+    if (!adapter || typeof adapter.push !== 'function') throw new Error('the public-source adapter is unavailable');
+    const built = buildPublicRepo({ root: sourceRoot, out, downloads, sourceUrl, version: manifest?.version });
+    const pushed = await adapter.push({ directory: out, version: manifest?.version || '', files: built.files.length });
+    return { ok: true, files: built.files.length, ...(pushed && typeof pushed === 'object' ? pushed : {}) };
+  } catch (error) {
+    return { ok: false, reason: String(error?.message || error).slice(0, 500) };
+  } finally {
+    fs.rmSync(path.dirname(out), { recursive: true, force: true });
+  }
+}
+
+async function publishVerifiedRelease({ manifest, sourceArtifactDirectory, authorityProvider, publicSource }) {
   verifyReleaseManifest({ manifest, artifactDirectory: sourceArtifactDirectory });
   if (typeof authorityProvider !== 'function') {
     throw new Error('NLC Node publishing requires a protected release authority adapter.');
@@ -32,7 +56,10 @@ async function publishVerifiedRelease({ manifest, sourceArtifactDirectory, autho
       throw new Error(`NLC Node staged artifact does not match its manifest: ${artifact.filename}.`);
     }
   }
-  return authority.publish({ manifest, staged });
+  const published = await authority.publish({ manifest, staged });
+  if (!publicSource) return published;
+  const refreshed = await refreshPublicSource({ publicSource, manifest });
+  return { ...(published && typeof published === 'object' ? published : { published }), publicSource: refreshed };
 }
 
 if (require.main === module) {
@@ -45,4 +72,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { protectedReleaseCredential, publishVerifiedRelease };
+module.exports = { protectedReleaseCredential, publishVerifiedRelease, refreshPublicSource };

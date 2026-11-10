@@ -18,7 +18,7 @@ This repository holds NLC Node's own source code and nothing else. It does not h
 | `lib/nlc-node` | The program: the local window, the folder rules, the connection to your own NLC, the file, video and speech tools. |
 | `scripts/nlc-node` | How a release is built and how this repository is made. |
 | `installer/nlc-node` | The Mac and Windows installers and the one-line install scripts (`one-line/`). |
-| `tests/nlc-node` | NLC Node's own tests that run on their own. 7 further tests need parts of NLC that are not published and are left out. |
+| `tests/nlc-node` | NLC Node's own tests that run on their own. 8 further tests need parts of NLC that are not published and are left out. |
 
 Each install script has two placeholders, `__NLC_ORIGIN__` (the address of your own NLC) and `__NLC_LINK__` (a one-time connection link, if you were given one). Your NLC fills them in when it serves the script.
 
