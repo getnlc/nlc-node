@@ -28,7 +28,7 @@ stop_everything() {
   sleep 2
   end_named "NLC Node Host"
 }
-trap 'stop_everything; defaults delete -g AppleInterfaceStyle >/dev/null 2>&1 || true' EXIT
+trap 'stop_everything; osascript -e "tell application \\"System Events\\" to tell appearance preferences to set dark mode to false" >/dev/null 2>&1 || true; defaults delete -g AppleInterfaceStyle >/dev/null 2>&1 || true' EXIT
 
 wait_for_file() { # path seconds
   local waited=0
@@ -40,7 +40,11 @@ prove_theme() { # light | dark
   local theme=$1
   stop_everything
   rm -f "${STATE_ROOT}/window-shown.txt" "${STATE_ROOT}/window-loaded.txt" "${STATE_ROOT}/last-open.txt"
+  # The system setting a customer changes in System Settings (the same switch the menu bar follows).
+  local dark=false; [[ "${theme}" == "dark" ]] && dark=true
+  osascript -e "tell application \"System Events\" to tell appearance preferences to set dark mode to ${dark}" || echo "System Events refused the appearance change; falling back to the defaults key."
   if [[ "${theme}" == "dark" ]]; then defaults write -g AppleInterfaceStyle Dark; else defaults delete -g AppleInterfaceStyle >/dev/null 2>&1 || true; fi
+  sleep 3
   echo "== ${theme}: appearance now '$(defaults read -g AppleInterfaceStyle 2>/dev/null || echo Light)'"
 
   # Start the way the LaunchAgent does: quiet, resident menu-bar app.
