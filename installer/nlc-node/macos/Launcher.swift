@@ -1,6 +1,7 @@
 import AppKit
 import Darwin
 import Foundation
+import WebKit
 
 // NLC Node menu-bar app. Starts the Node host, shows a connected / paused / offline dot in the menu bar,
 // opens the Node window (a loopback page served by the host, piece K), registers launch at login, and keeps one instance.
@@ -51,7 +52,53 @@ func openWindow(recordOnly: Bool) {
         try? url.absoluteString.write(to: stateRoot.appendingPathComponent("last-open.txt"), atomically: true, encoding: .utf8)
         return
     }
-    NSWorkspace.shared.open(url)
+    NodeWindow.shared.show(url)
+}
+
+// The Node window: a small native popover under the menu-bar icon holding the host's loopback page.
+// It follows the system light / dark setting by itself and never opens a browser tab.
+final class NodeWindow: NSObject, WKNavigationDelegate {
+    static let shared = NodeWindow()
+    let popover = NSPopover()
+    var webView: WKWebView?
+    weak var anchor: NSStatusBarButton?
+
+    func show(_ url: URL) {
+        if webView == nil {
+            let view = WKWebView(frame: NSRect(x: 0, y: 0, width: 400, height: 620))
+            view.navigationDelegate = self
+            view.setValue(false, forKey: "drawsBackground")
+            let controller = NSViewController()
+            controller.view = view
+            popover.contentViewController = controller
+            popover.contentSize = NSSize(width: 400, height: 620)
+            popover.behavior = .transient
+            webView = view
+        }
+        if webView?.url == nil { webView?.load(URLRequest(url: url)) }
+        guard let button = anchor else { return }
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        if popover.isShown { popover.performClose(nil) } else { popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY) }
+        // Verification runs read this to see that the window really opened under the menu-bar icon.
+        try? "shown=\(popover.isShown)".write(to: stateRoot.appendingPathComponent("window-shown.txt"), atomically: true, encoding: .utf8)
+    }
+
+    // Records that the page finished loading inside the window (its title), for verification runs.
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        webView.evaluateJavaScript("document.title") { value, _ in
+            try? "loaded title=\(value as? String ?? "")".write(to: stateRoot.appendingPathComponent("window-loaded.txt"), atomically: true, encoding: .utf8)
+        }
+    }
+
+    // Links that leave the window (NLC Central, Finder) open outside it, never inside the small window.
+    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        if let target = action.request.url, target.host != "127.0.0.1", action.navigationType == .linkActivated {
+            NSWorkspace.shared.open(target)
+            decisionHandler(.cancel)
+            return
+        }
+        decisionHandler(.allow)
+    }
 }
 
 enum Indicator: String {
@@ -158,6 +205,7 @@ final class MenuBarController: NSObject {
         quit.target = self
         menu.addItem(quit)
         item.menu = menu
+        NodeWindow.shared.anchor = item.button
         refresh()
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.refresh() }
     }
@@ -199,7 +247,8 @@ if !verificationRun {
     let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
         .filter { $0.processIdentifier != me }
     if !others.isEmpty {
-        if !backgroundRun { openWindow(recordOnly: false) }
+        // The copy already running shows its own window; this launch only asks it to.
+        if !backgroundRun { DistributedNotificationCenter.default().postNotificationName(NSNotification.Name("com.nlc.node.show"), object: nil, userInfo: nil, deliverImmediately: true) }
         exit(0)
     }
 }
@@ -217,7 +266,8 @@ if verificationRun {
     exit(0)
 }
 
-if !backgroundRun { openWindow(recordOnly: false) }
 let menuBar = MenuBarController()
 menuBar.start()
+DistributedNotificationCenter.default().addObserver(forName: NSNotification.Name("com.nlc.node.show"), object: nil, queue: .main) { _ in openWindow(recordOnly: false) }
+if !backgroundRun { DispatchQueue.main.async { openWindow(recordOnly: false) } }
 application.run()

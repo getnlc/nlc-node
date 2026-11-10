@@ -1,0 +1,112 @@
+name: NLC Node window proof (unsigned)
+
+# Builds the unsigned Mac app and Windows installer, opens each one the way a customer does,
+# and keeps a screenshot of the window in light and dark. Standard GitHub-hosted runners only.
+on:
+  workflow_dispatch:
+  push:
+    branches: [pc03-proof]
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: macOS menu-bar window (compile, launch, popover)
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+      - name: Install build dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install ffmpeg for the video tool tests (test only; the shipped ffmpeg is the LGPL build)
+        run: brew install ffmpeg
+      - name: Run the NLC Node tests that need no other part of NLC
+        continue-on-error: true
+        run: node --test tests/nlc-node/*.test.cjs
+      - name: Make a throwaway update key for this test build
+        run: |
+          node -e "const c=require('crypto');const k=c.generateKeyPairSync('ed25519');console.log('NLC_NODE_UPDATE_PUBLIC_KEY_B64='+k.publicKey.export({format:'der',type:'spki'}).toString('base64'))" >> "${GITHUB_ENV}"
+          echo "NLC_NODE_WITHOUT_CENTRAL_TRANSPORT=1" >> "${GITHUB_ENV}"
+      - name: Build the unsigned app and dmg (compiles the Swift launcher)
+        run: |
+          set -euo pipefail
+          DMG=$(bash ./installer/nlc-node/macos/build.sh macos-arm64 | tail -n 1)
+          echo "NLC_NODE_DMG=${DMG}" >> "${GITHUB_ENV}"
+      - name: Open the app and prove the menu-bar window opens, in light and dark
+        run: bash ./installer/nlc-node/macos/window-proof.sh "${NLC_NODE_DMG}" "${RUNNER_TEMP}/shots"
+      - name: Keep the screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NLC-Node-macos-window-screenshots
+          path: ${{ runner.temp }}/shots
+          if-no-files-found: warn
+          retention-days: 14
+
+  windows:
+    name: Windows tray window (install, launch, window)
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          choco install nsis --no-progress --yes
+          $nsis = Get-Command makensis.exe -ErrorAction SilentlyContinue
+          if (-not $nsis) { throw "NSIS did not provide makensis.exe." }
+          & $nsis.Source /VERSION
+      - name: Install build dependencies
+        shell: pwsh
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Run the NLC Node tests that need no other part of NLC
+        continue-on-error: true
+        shell: pwsh
+        run: node --test (Get-ChildItem tests/nlc-node/*.test.cjs | ForEach-Object { $_.FullName })
+      - name: Make a throwaway update key for this test build
+        shell: pwsh
+        run: |
+          node -e "const c=require('crypto');const k=c.generateKeyPairSync('ed25519');console.log('NLC_NODE_UPDATE_PUBLIC_KEY_B64='+k.publicKey.export({format:'der',type:'spki'}).toString('base64'))" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "NLC_NODE_WITHOUT_CENTRAL_TRANSPORT=1" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Fetch the pinned video and captioning programs and lay them out for the setup program
+        shell: pwsh
+        run: |
+          # bsdtar (System32) reads zip; Git's GNU tar does not.
+          $env:PATH = "$env:SystemRoot\System32;$env:PATH"
+          node scripts/nlc-node/fetch-ffmpeg.cjs win32-x64 "$env:RUNNER_TEMP\tools-src\ffmpeg"
+          if ($LASTEXITCODE -ne 0) { throw 'ffmpeg fetch failed' }
+          node scripts/nlc-node/fetch-whisper.cjs win32-x64 "$env:RUNNER_TEMP\tools-src\whisper"
+          if ($LASTEXITCODE -ne 0) { throw 'whisper fetch failed' }
+          node scripts/nlc-node/build-payload.cjs windows-x64 --stage-tools "$env:RUNNER_TEMP\tools" --ffmpeg-dir "$env:RUNNER_TEMP\tools-src\ffmpeg\win32-x64" --whisper-dir "$env:RUNNER_TEMP\tools-src\whisper\win32-x64"
+          if ($LASTEXITCODE -ne 0) { throw 'staging the tools failed' }
+      - name: Build the unsigned Windows installer
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          $installationPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $installationPath) { throw "Visual C++ build tools are unavailable." }
+          $developerCommand = Join-Path $installationPath "Common7\Tools\VsDevCmd.bat"
+          cmd.exe /c "`"$developerCommand`" -arch=x64 && set" | ForEach-Object {
+            if ($_ -match "^(.*?)=(.*)$") { [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process") }
+          }
+          .\installer\nlc-node\windows\build.ps1 -OutputRoot "$env:GITHUB_WORKSPACE\dist\nlc-node\windows-x64" -ToolsDir "$env:RUNNER_TEMP\tools"
+      - name: Install, open the tray window and prove it, in light and dark
+        shell: pwsh
+        run: |
+          $name = (node lib/nlc-node/artifact-names.cjs setup).Trim()
+          .\installer\nlc-node\windows\window-proof.ps1 -InstallerPath "$env:GITHUB_WORKSPACE\dist\nlc-node\windows-x64\$name" -OutDir "$env:RUNNER_TEMP\shots"
+      - name: Keep the screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NLC-Node-windows-window-screenshots
+          path: ${{ runner.temp }}/shots
+          if-no-files-found: warn
+          retention-days: 14

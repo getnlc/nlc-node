@@ -1,6 +1,16 @@
-/* Copy of the NLC colour token map (ui/public/css/style.css :root). Colours only; the window adds no colours of its own. */
+/* Colour tokens for the Node window. Light by default (NLC's own light theme colours); dark when the system is dark. Colours only; the window adds no colours of its own. */
 :root {
-  --bg: #0d1117; --surface: #161b22; --border: #30363d;
-  --text: #e6edf3; --text-dim: #8b949e; --accent: #58a6ff;
-  --accent-dim: #1f6feb; --danger: #f85149; --success: #3fb950;
+  color-scheme: light dark;
+  --bg: #f6f5f2; --surface: #fbfaf8; --border: #dcdad6;
+  --text: #2c2c2b; --text-dim: #6b6964; --accent: #105fad;
+  --accent-dim: #105fad; --on-accent: #ffffff; --danger: #cd3c3a; --success: #3b7455;
+  --track: #85827d; --knob: #fbfaf8;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #e6edf3; --text-dim: #8b949e; --accent: #58a6ff;
+    --accent-dim: #1f6feb; --on-accent: #ffffff; --danger: #f85149; --success: #3fb950;
+    --track: #30363d; --knob: #e6edf3;
+  }
 }

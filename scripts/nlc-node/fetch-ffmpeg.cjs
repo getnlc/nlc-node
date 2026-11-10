@@ -17,10 +17,12 @@ const { execFile } = require('node:child_process');
 // NLC_FFMPEG_DARWIN_ARM64_SHA256 / NLC_FFMPEG_DARWIN_X64_SHA256 supply the hashes printed by the workflow until they are committed below.
 const FFMPEG_VERSION = '8.1.3';
 const BLOCKED_HOSTS = ['ffmpeg.martin-riedl.de', 'evermeet.cx', 'osxexperts.net']; // GPL builds with libx264/libx265
-const WIN_FILE = 'ffmpeg-n8.1.3-24-g92611900bb-win64-lgpl-8.1.zip';
-const WIN_BTBN_URL = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-23-13-04/' + WIN_FILE;
-// From the release's checksums.sha256 (read 24 Oct 2026, 4:40 PM SGT). The zip was not downloaded or run here.
-const WIN_SHA256 = 'fcf161b43e3de302663b2a4be5bfa7105b607d310a97709b323f3d8eddec453a';
+// Windows: the newest LGPL build of the pinned FFmpeg series, read from BtbN's rolling "latest" release. BtbN deletes old dated
+// builds, so nothing dated is pinned here. The SHA-256 is the digest GitHub reports for that exact asset and is checked again
+// against the downloaded bytes. A different FFmpeg series needs a person to change WIN_SERIES.
+const WIN_SERIES = '8.1';
+const WIN_LATEST_API = 'https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/latest';
+const WIN_LATEST_ASSET = `ffmpeg-n${WIN_SERIES}-latest-win64-lgpl-${WIN_SERIES}.zip`;
 
 function buildSources(env = process.env) {
   const base = (env.NLC_FFMPEG_RELEASE_BASE || '').replace(/\/+$/, '');
@@ -33,8 +35,10 @@ function buildSources(env = process.env) {
   });
   return {
     'win32-x64': {
-      url: base ? `${base}/${WIN_FILE}` : WIN_BTBN_URL,
-      sha256: WIN_SHA256,
+      // With our own storage folder set, the zip is read from there and its hash comes from NLC_FFMPEG_WIN32_X64_SHA256.
+      url: base ? `${base}/${WIN_LATEST_ASSET}` : null,
+      sha256: base ? (env.NLC_FFMPEG_WIN32_X64_SHA256 || null) : null,
+      latest: !base,
       exe: '.exe',
       licence: 'LGPL-2.1-or-later (BtbN FFmpeg built without --enable-gpl, --enable-nonfree; no libx264/libx265)',
     },
@@ -65,9 +69,23 @@ function findFile(dir, name) {
   return null;
 }
 
-async function fetchFfmpeg({ target, destDir, sources = SOURCES, fetch: doFetch = globalThis.fetch, extract = defaultExtract }) {
+// Fills in url and sha256 for a "newest build" entry from GitHub's own record of the asset.
+async function resolveSource(target, sources = SOURCES, doFetch = globalThis.fetch) {
   const src = sources[target];
-  if (!src) throw new Error(`Unknown target ${target}. Use one of: ${Object.keys(sources).join(', ')}`);
+  if (!src || !src.latest) return src;
+  const res = await doFetch(WIN_LATEST_API, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'nlc-node-build' } });
+  if (!res.ok) throw new Error(`Could not read the newest ${target} build list (${res.status}).`);
+  const release = await res.json();
+  const asset = (release.assets || []).find((a) => a.name === WIN_LATEST_ASSET);
+  if (!asset) throw new Error(`The newest ${target} build list has no ${WIN_LATEST_ASSET}. A person must check the FFmpeg series.`);
+  const digest = /^sha256:([0-9a-f]{64})$/i.exec(String(asset.digest || ''));
+  if (!digest) throw new Error(`GitHub reports no SHA-256 for ${asset.name}, so it cannot be verified. Nothing was downloaded.`);
+  return { ...src, url: asset.browser_download_url, sha256: digest[1].toLowerCase(), latest: false };
+}
+
+async function fetchFfmpeg({ target, destDir, sources = SOURCES, fetch: doFetch = globalThis.fetch, extract = defaultExtract }) {
+  if (!sources[target]) throw new Error(`Unknown target ${target}. Use one of: ${Object.keys(sources).join(', ')}`);
+  const src = await resolveSource(target, sources, doFetch);
   if (src.blocked) throw new Error(`Refusing ${target}: ${src.blocked}`);
   if (!src.url) throw new Error(`Refusing ${target}: ${src.missingBase || 'no download URL.'}`);
   refuseIfNotLgpl(target, src);
@@ -92,7 +110,7 @@ async function fetchFfmpeg({ target, destDir, sources = SOURCES, fetch: doFetch 
   return { ffmpeg, ffprobe, licence: src.licence };
 }
 
-module.exports = { fetchFfmpeg, SOURCES, buildSources, BLOCKED_HOSTS, FFMPEG_VERSION };
+module.exports = { fetchFfmpeg, resolveSource, SOURCES, buildSources, BLOCKED_HOSTS, FFMPEG_VERSION };
 
 if (require.main === module) {
   const [target, destDir] = process.argv.slice(2);

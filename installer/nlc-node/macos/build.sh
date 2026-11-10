@@ -37,7 +37,7 @@ rm -rf "${OUTPUT_ROOT}"
 mkdir -p "${MACOS_DIR}" "${STAGING}"
 
 node "${REPO_ROOT}/scripts/nlc-node/build-sea.cjs" --target "${TARGET}" --output-dir "${MACOS_DIR}" "${SEA_EXTRA[@]+"${SEA_EXTRA[@]}"}"
-swiftc -target "${SWIFT_TARGET}" -framework AppKit "${SCRIPT_DIR}/Launcher.swift" -o "${MACOS_DIR}/NLC Node"
+swiftc -target "${SWIFT_TARGET}" -framework AppKit -framework WebKit "${SCRIPT_DIR}/Launcher.swift" -o "${MACOS_DIR}/NLC Node"
 sed "s/__NLC_NODE_VERSION__/${VERSION}/g" "${SCRIPT_DIR}/Info.plist" > "${CONTENTS}/Info.plist"
 # build-sea leaves its bundle, blob and config next to the host; only the two executables belong in the app.
 rm -f "${MACOS_DIR}/nlc-node.bundle.cjs" "${MACOS_DIR}/nlc-node.sea.blob" "${MACOS_DIR}/sea-config.json"
@@ -63,7 +63,12 @@ fi
 
 cp -R "${APP_ROOT}" "${STAGING}/"
 ln -s /Applications "${STAGING}/Applications"
-hdiutil create -volname "NLC Node" -srcfolder "${STAGING}" -ov -format UDZO "${DMG_PATH}"
+# macOS sometimes answers "Resource busy" for a moment while it is still indexing the new app; trying again is the supported answer.
+for attempt in 1 2 3 4 5; do
+  hdiutil create -volname "NLC Node" -srcfolder "${STAGING}" -ov -format UDZO "${DMG_PATH}" && break
+  [[ ${attempt} -lt 5 ]] || { echo "NLC Node could not make the dmg after five tries." >&2; exit 1; }
+  sleep 10
+done
 
 if [[ "${SIGN}" == "--sign" ]]; then
   codesign --force --timestamp --sign "${NLC_NODE_MAC_APPLICATION_IDENTITY}" "${DMG_PATH}"
