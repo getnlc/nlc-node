@@ -6,7 +6,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { fetchFfmpeg, SOURCES } = require('../../scripts/nlc-node/fetch-ffmpeg.cjs');
+const { fetchFfmpeg, resolveSource, SOURCES } = require('../../scripts/nlc-node/fetch-ffmpeg.cjs');
 
 function serve(body) {
   return new Promise((resolve) => {
@@ -66,18 +66,39 @@ test('the shipped source table covers the three targets and never lists a GPL bu
 const { buildSources, BLOCKED_HOSTS } = require('../../scripts/nlc-node/fetch-ffmpeg.cjs');
 const BASE = 'https://example.invalid/nlc-ffmpeg/ffmpeg-8.1.3-1';
 
-test('Windows entry is the pinned BtbN LGPL zip with the SHA-256 read from the release checksums file', () => {
+test('Windows entry is the newest BtbN LGPL build, found at build time and verified against the digest GitHub reports', async () => {
   const s = buildSources({});
-  assert.strictEqual(s['win32-x64'].sha256, '7bdec3860d33145a7cd68146eb8e1414e8881cac76205401211fbdad38ef0ed3');
-  assert.match(s['win32-x64'].url, /autobuild-2026-11-09-12-42\/ffmpeg-n8\.1\.3-34-ga35157abb9-win64-lgpl-8\.1\.zip$/);
+  assert.strictEqual(s['win32-x64'].latest, true);
+  assert.strictEqual(s['win32-x64'].url, null);
+  const digest = 'a'.repeat(64);
+  const fakeFetch = async (u) => ({ ok: true, json: async () => ({ assets: [
+    { name: 'ffmpeg-n8.1-latest-win64-gpl-8.1.zip', digest: 'sha256:' + 'b'.repeat(64), browser_download_url: 'https://example.test/gpl.zip' },
+    { name: 'ffmpeg-n8.1-latest-win64-lgpl-8.1.zip', digest: 'sha256:' + digest.toUpperCase(), browser_download_url: 'https://example.test/newest/ffmpeg-n8.1-latest-win64-lgpl-8.1.zip' },
+  ] }) });
+  const r = await resolveSource('win32-x64', s, fakeFetch);
+  assert.strictEqual(r.url, 'https://example.test/newest/ffmpeg-n8.1-latest-win64-lgpl-8.1.zip');
+  assert.strictEqual(r.sha256, digest);
+  assert.match(r.licence, /^LGPL/);
 });
 
-test('NLC_FFMPEG_RELEASE_BASE points every target at our own storage and keeps the pinned hash', () => {
-  const s = buildSources({ NLC_FFMPEG_RELEASE_BASE: BASE });
+test('a newest build with no digest from GitHub, or no LGPL asset, is refused and nothing downloads', async () => {
+  const s = buildSources({});
+  const noDigest = async () => ({ ok: true, json: async () => ({ assets: [{ name: 'ffmpeg-n8.1-latest-win64-lgpl-8.1.zip', browser_download_url: 'https://example.test/x.zip' }] }) });
+  await assert.rejects(resolveSource('win32-x64', s, noDigest), /no SHA-256/);
+  const noAsset = async () => ({ ok: true, json: async () => ({ assets: [] }) });
+  await assert.rejects(resolveSource('win32-x64', s, noAsset), /no ffmpeg-n8\.1-latest-win64-lgpl/);
+  let downloaded = false;
+  const spy = async (u) => { if (String(u).includes('api.github.com')) return noDigest(); downloaded = true; throw new Error('should not download'); };
+  await assert.rejects(fetchFfmpeg({ target: 'win32-x64', destDir: fs.mkdtempSync(path.join(os.tmpdir(), 'q1-nd-')), sources: s, fetch: spy, extract: fakeExtract('.exe') }), /no SHA-256/);
+  assert.strictEqual(downloaded, false);
+});
+
+test('NLC_FFMPEG_RELEASE_BASE points every target at our own storage and takes the Windows hash from the environment', () => {
+  const s = buildSources({ NLC_FFMPEG_RELEASE_BASE: BASE, NLC_FFMPEG_WIN32_X64_SHA256: 'c'.repeat(64) });
   assert.strictEqual(s['darwin-arm64'].url, BASE + '/ffmpeg-8.1.3-darwin-arm64-lgpl.tar.gz');
   assert.strictEqual(s['darwin-x64'].url, BASE + '/ffmpeg-8.1.3-darwin-x64-lgpl.tar.gz');
-  assert.strictEqual(s['win32-x64'].url, BASE + '/ffmpeg-n8.1.3-34-ga35157abb9-win64-lgpl-8.1.zip');
-  assert.strictEqual(s['win32-x64'].sha256, '7bdec3860d33145a7cd68146eb8e1414e8881cac76205401211fbdad38ef0ed3');
+  assert.strictEqual(s['win32-x64'].url, BASE + '/ffmpeg-n8.1-latest-win64-lgpl-8.1.zip');
+  assert.strictEqual(s['win32-x64'].sha256, 'c'.repeat(64));
   for (const t of ['darwin-arm64', 'darwin-x64']) assert.match(s[t].licence, /^LGPL/);
 });
 

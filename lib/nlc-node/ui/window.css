@@ -41,3 +41,6 @@ ul { list-style: none; }
 .activity .when { color: var(--text-dim); }
 .activity .failed { color: var(--danger); }
 .gap { margin-top: 12px; }
+details.code { margin-top: 14px; }
+details.code summary { cursor: pointer; color: var(--text-dim); font-size: 13px; text-decoration: underline; }
+details.code form { margin-top: 10px; }

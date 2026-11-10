@@ -399,7 +399,10 @@ test('HF-20: a customer with no code is told plainly where to press Allow: NLC C
       assert.match(text, /NLC card/, state);
       assert.match(text, /wants to connect/, state);
       assert.doesNotMatch(text, /assistant gave you/, state);
-      if (state === 'unpaired') assert.match(text, /No code\? Just press Allow in NLC Central/);
+      assert.match(text, /Waiting for you to press Allow in NLC Central/, state);
+      assert.equal((text.match(/press Allow/g) || []).length, 2, state);
+      assert.match(text, /Have a code\?/, state);
+      assert.doesNotMatch(text, /Try again|Ask your NLC again|Connect this computer/, state);
     } finally { await t.server.close(); }
   }
 });

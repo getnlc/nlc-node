@@ -217,11 +217,11 @@ jobs:
           $env:PATH = "$env:SystemRoot\System32;$env:PATH"
           node scripts/nlc-node/fetch-ffmpeg.cjs win32-x64 "$env:RUNNER_TEMP\ffmpeg"
           # Keep the exact zip too, so we can host it ourselves (BtbN deletes old dated builds).
-          $url = node -e "console.log(require('./scripts/nlc-node/fetch-ffmpeg.cjs').SOURCES['win32-x64'].url)"
+          $url = node -e "require('./scripts/nlc-node/fetch-ffmpeg.cjs').resolveSource('win32-x64').then((r) => console.log(r.url))"
           $name = Split-Path $url -Leaf
           New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\pkg" | Out-Null
           Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\pkg\$name"
-          $want = node -e "console.log(require('./scripts/nlc-node/fetch-ffmpeg.cjs').SOURCES['win32-x64'].sha256)"
+          $want = node -e "require('./scripts/nlc-node/fetch-ffmpeg.cjs').resolveSource('win32-x64').then((r) => console.log(r.sha256))"
           $got = (Get-FileHash "$env:RUNNER_TEMP\pkg\$name" -Algorithm SHA256).Hash.ToLower()
           if ($got -ne $want) { throw "Checksum mismatch for $name" }
           "$got  $name" | Out-File -Encoding ascii "$env:RUNNER_TEMP\pkg\$name.sha256"

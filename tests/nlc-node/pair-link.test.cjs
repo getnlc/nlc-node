@@ -89,7 +89,7 @@ test('Y2/Y4 journey: a Node with no address pairs from the connection link, reme
   app = makeNode(dir);
   await app.start();
   const win = await windowOf(app);
-  assert.match(visible(await win.view()), /Not connected yet/);
+  assert.match(visible(await win.view()), /Waiting for you to press Allow in NLC Central/);
 
   // A code on its own cannot work: this copy was not told where the customer's NLC is.
   const code1 = (await vps.dashboard('POST', '/api/node/pair/code')).json.code;
