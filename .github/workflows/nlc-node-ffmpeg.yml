@@ -1,0 +1,299 @@
+name: NLC Node ffmpeg (LGPL)
+
+# Builds / collects the LGPL ffmpeg + ffprobe that NLC Node bundles. Manual only. Never builds with x264/x265 (GPL).
+#   macOS (arm64 + x64): built from the official FFmpeg source tarball, GPG-verified, with --disable-gpl --disable-nonfree.
+#   Windows (x64):       the pinned BtbN LGPL zip, SHA-256 checked against scripts/nlc-node/fetch-ffmpeg.cjs.
+# Output: artifacts (tar.gz / zip + .sha256 + corresponding source). Optional publish to a GitHub Release = our storage
+# location; the value of that release folder URL becomes NLC_FFMPEG_RELEASE_BASE for scripts/nlc-node/fetch-ffmpeg.cjs.
+
+on:
+  # A push of the CI branch runs the first-run mode: unpinned sources allowed, publishing disabled (no inputs on a push).
+  # Only pushes that touch the ffmpeg build itself start the long Mac builds.
+  push:
+    branches: [nlc-node-ci, nlc-node-fin]
+    paths:
+      - .github/workflows/nlc-node-ffmpeg.yml
+      - scripts/nlc-node/fetch-ffmpeg.cjs
+      - installer/nlc-node/NOTICE-ffmpeg.txt
+  # Called by the one-line install workflow so its payloads carry the ffmpeg built in the same run.
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      allow_unpinned_sources:
+        description: "First run only: let the macOS dependency tarballs build without a pinned SHA-256 (the hashes are printed so you can pin them below)"
+        type: boolean
+        default: true
+      publish_tag:
+        description: "Release tag to publish the artifacts to (empty = artifacts only), e.g. ffmpeg-8.1.3-1"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  FFMPEG_VERSION: "8.1.3"
+  # Pin these after the first run (the run prints "SHA256 <name> <hash>" for each). Empty = unpinned.
+  FFMPEG_SHA256: "7138d28c96d9d3e3af4ee3d8cad72741f8ffb40da90c1112235dea3ecd3178a3"
+  FREETYPE_VERSION: "2.13.3"
+  FREETYPE_SHA256: "0550350666d427c74daeb85d5ac7bb353acba5f76956395995311a9c6f063289"
+  FRIBIDI_VERSION: "1.0.16"
+  FRIBIDI_SHA256: "1b1cde5b235d40479e91be2f0e88a309e3214c8ab470ec8a2744d82a5a9ea05c"
+  HARFBUZZ_VERSION: "10.4.0"
+  HARFBUZZ_SHA256: "480b6d25014169300669aa1fc39fb356c142d5028324ea52b3a27648b9beaad8"
+  LIBASS_VERSION: "0.17.3"
+  LIBASS_SHA256: "eae425da50f0015c21f7b3a9c7262a910f0218af469e22e2931462fed3c50959"
+
+jobs:
+  macos:
+    name: ffmpeg macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-14
+          - arch: x64
+            # Native Intel runner: no cross-compiling of libass and its dependencies.
+            runner: macos-15-intel
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools (build tools only; no ffmpeg libraries from Homebrew)
+        run: brew install nasm pkgconf meson ninja
+
+      - name: Download and verify the sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/src" && cd "$RUNNER_TEMP/src"
+          get() { # name url expected_sha256
+            local name="$1" url="$2" want="$3"
+            curl -fsSL --retry 3 -o "$name" "$url"
+            local got; got=$(shasum -a 256 "$name" | cut -d' ' -f1)
+            echo "SHA256 $name $got"
+            if [ -n "$want" ]; then
+              [ "$got" = "$want" ] || { echo "::error::Checksum mismatch for $name"; exit 1; }
+            elif [ "${{ inputs.allow_unpinned_sources || github.event_name == 'push' }}" != "true" ]; then
+              echo "::error::$name is not pinned. Pin the printed hash in the workflow env."; exit 1
+            fi
+          }
+          get "ffmpeg-$FFMPEG_VERSION.tar.xz" "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz" "$FFMPEG_SHA256"
+          get "freetype-$FREETYPE_VERSION.tar.xz" "https://download.savannah.gnu.org/releases/freetype/freetype-$FREETYPE_VERSION.tar.xz" "$FREETYPE_SHA256"
+          get "fribidi-$FRIBIDI_VERSION.tar.xz" "https://github.com/fribidi/fribidi/releases/download/v$FRIBIDI_VERSION/fribidi-$FRIBIDI_VERSION.tar.xz" "$FRIBIDI_SHA256"
+          get "harfbuzz-$HARFBUZZ_VERSION.tar.xz" "https://github.com/harfbuzz/harfbuzz/releases/download/$HARFBUZZ_VERSION/harfbuzz-$HARFBUZZ_VERSION.tar.xz" "$HARFBUZZ_SHA256"
+          get "libass-$LIBASS_VERSION.tar.xz" "https://github.com/libass/libass/releases/download/$LIBASS_VERSION/libass-$LIBASS_VERSION.tar.xz" "$LIBASS_SHA256"
+          # FFmpeg release signature. The signing key fingerprint is the one FFmpeg publishes on https://ffmpeg.org/download.html (UNVERIFIED here; a mismatch fails the run).
+          curl -fsSL --retry 3 -o "ffmpeg-$FFMPEG_VERSION.tar.xz.asc" "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz.asc"
+          curl -fsSL --retry 3 -o ffmpeg-devel.asc "https://ffmpeg.org/ffmpeg-devel.asc"
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"; mkdir -p "$GNUPGHOME"; chmod 700 "$GNUPGHOME"
+          gpg --batch --import ffmpeg-devel.asc
+          gpg --batch --fingerprint | tr -d ' ' | grep -q "FCF986EA15E6E293A5644F10B4322F04D67658D8" || { echo "::error::FFmpeg signing key fingerprint differs from the published one"; exit 1; }
+          gpg --batch --verify "ffmpeg-$FFMPEG_VERSION.tar.xz.asc" "ffmpeg-$FFMPEG_VERSION.tar.xz"
+
+      - name: Build libass and its dependencies (static, no GPL parts)
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC="$RUNNER_TEMP/src"; DEPS="$RUNNER_TEMP/deps"; mkdir -p "$DEPS"
+          export PKG_CONFIG_PATH="$DEPS/lib/pkgconfig"
+          export CFLAGS="-O2 -mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET" LDFLAGS="-mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET"
+          cd "$SRC"
+          tar xf "freetype-$FREETYPE_VERSION.tar.xz" && (cd "freetype-$FREETYPE_VERSION" && ./configure --prefix="$DEPS" --disable-shared --enable-static --with-harfbuzz=no --with-png=no --with-brotli=no --with-bzip2=no && make -j"$(sysctl -n hw.ncpu)" && make install)
+          tar xf "fribidi-$FRIBIDI_VERSION.tar.xz" && (cd "fribidi-$FRIBIDI_VERSION" && meson setup build --prefix="$DEPS" --libdir=lib -Ddefault_library=static -Ddocs=false -Dbin=false -Dtests=false && ninja -C build install)
+          tar xf "harfbuzz-$HARFBUZZ_VERSION.tar.xz" && (cd "harfbuzz-$HARFBUZZ_VERSION" && meson setup build --prefix="$DEPS" --libdir=lib -Ddefault_library=static -Dfreetype=enabled -Dglib=disabled -Dgobject=disabled -Dcairo=disabled -Dicu=disabled -Dtests=disabled -Ddocs=disabled -Dbenchmark=disabled && ninja -C build install)
+          # libass uses macOS CoreText for fonts: no fontconfig/expat needed.
+          tar xf "libass-$LIBASS_VERSION.tar.xz" && (cd "libass-$LIBASS_VERSION" && ./configure --prefix="$DEPS" --disable-shared --enable-static --disable-fontconfig --enable-coretext --disable-libunibreak && make -j"$(sysctl -n hw.ncpu)" && make install)
+
+      - name: Build FFmpeg (LGPL only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC="$RUNNER_TEMP/src"; DEPS="$RUNNER_TEMP/deps"; OUT="$RUNNER_TEMP/out"; mkdir -p "$OUT"
+          export PKG_CONFIG_PATH="$DEPS/lib/pkgconfig"
+          cd "$SRC" && tar xf "ffmpeg-$FFMPEG_VERSION.tar.xz" && cd "ffmpeg-$FFMPEG_VERSION"
+          # --disable-gpl --disable-nonfree: no libx264/libx265/fdk-aac. No --enable-version3: stays LGPL-2.1-or-later.
+          # --disable-autodetect: only the libraries named below can end up inside the binary.
+          ./configure --prefix="$OUT" \
+            --disable-gpl --disable-nonfree --disable-autodetect \
+            --enable-static --disable-shared --disable-doc --disable-ffplay \
+            --enable-videotoolbox --enable-audiotoolbox --enable-zlib --enable-iconv \
+            --enable-libass --pkg-config-flags=--static \
+            --extra-cflags="-I$DEPS/include -mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET" \
+            --extra-ldflags="-L$DEPS/lib -mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET" 2>&1 | tail -n 40
+          make -j"$(sysctl -n hw.ncpu)"
+          make install
+          strip -x "$OUT/bin/ffmpeg" "$OUT/bin/ffprobe"
+          cp config.h "$OUT/build-config.h"
+
+      - name: Licence and linkage checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          B="$RUNNER_TEMP/out/bin"
+          "$B/ffmpeg" -version | tee "$RUNNER_TEMP/out/ffmpeg-version.txt"
+          cfg=$(grep '^configuration:' "$RUNNER_TEMP/out/ffmpeg-version.txt")
+          if echo "$cfg" | grep -Eq -- '--enable-(gpl|nonfree|version3|libx264|libx265)'; then echo "::error::Not an LGPL-2.1+ configuration: $cfg"; exit 1; fi
+          echo "$cfg" | grep -q -- '--disable-gpl' || { echo "::error::--disable-gpl missing"; exit 1; }
+          # Static means: only system libraries are loaded.
+          for f in ffmpeg ffprobe; do
+            bad=$(otool -L "$B/$f" | tail -n +2 | awk '{print $1}' | grep -Ev '^(/usr/lib/|/System/Library/)' || true)
+            [ -z "$bad" ] || { echo "::error::$f links a non-system library: $bad"; exit 1; }
+          done
+
+      - name: Smoke test (version, encoders, filters, trim, burn captions, proxy)
+        shell: bash
+        run: |
+          set -euo pipefail
+          B="$RUNNER_TEMP/out/bin"; FF="$B/ffmpeg -hide_banner -loglevel error -y"; W="$RUNNER_TEMP/smoke"; mkdir -p "$W"; cd "$W"
+          "$B/ffmpeg" -version | head -n 1; "$B/ffprobe" -version | head -n 1
+          "$B/ffmpeg" -hide_banner -encoders | tee encoders.txt | grep -E 'h264_videotoolbox|hevc_videotoolbox|prores_ks|aac '
+          grep -q 'h264_videotoolbox' encoders.txt
+          ! grep -Eq ' libx26[45] ' encoders.txt
+          "$B/ffmpeg" -hide_banner -filters | tee filters.txt | grep -w -E 'subtitles|scale|ass'
+          grep -Eq ' subtitles ' filters.txt
+          # Hosted macOS VMs may have no hardware encoder; then the later steps use mpeg4 and the gap is reported.
+          VC="h264_videotoolbox -b:v 1M -pix_fmt yuv420p"
+          if ! $FF -f lavfi -i testsrc2=size=640x360:rate=25 -f lavfi -i sine=frequency=440 -t 6 -c:v $VC -c:a aac -shortest in.mp4 2>vt.err; then
+            echo "::warning::h264_videotoolbox could not encode on this runner ($(head -c 300 vt.err)); smoke continues with mpeg4. REAL-MAC CHECK STILL OWED."
+            VC="mpeg4 -q:v 4"; $FF -f lavfi -i testsrc2=size=640x360:rate=25 -f lavfi -i sine=frequency=440 -t 6 -c:v $VC -c:a aac -shortest in.mp4
+          fi
+          # trim
+          $FF -ss 1 -to 4 -i in.mp4 -c:v $VC -c:a aac trim.mp4
+          d=$("$B/ffprobe" -v error -show_entries format=duration -of csv=p=0 trim.mp4); echo "trim duration $d"
+          awk -v d="$d" 'BEGIN{exit !(d>2.5 && d<3.6)}'
+          # burn captions
+          printf '1\n00:00:00,000 --> 00:00:05,000\nHELLO NLC CAPTION\n\n' > cap.srt
+          $FF -i in.mp4 -vf "subtitles=cap.srt:force_style='FontName=Helvetica,FontSize=28,PrimaryColour=&H00FFFFFF'" -c:v $VC -c:a aac burned.mp4
+          $FF -ss 2 -i in.mp4 -frames:v 1 plain.png; $FF -ss 2 -i burned.mp4 -frames:v 1 burned.png
+          [ "$(shasum plain.png | cut -d' ' -f1)" != "$(shasum burned.png | cut -d' ' -f1)" ] || { echo "::error::captions were not drawn on the frame"; exit 1; }
+          # proxy
+          $FF -i in.mp4 -vf scale=-2:360 -c:v $VC -c:a aac proxy.mp4
+          [ "$("$B/ffprobe" -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 proxy.mp4)" = "360" ]
+          "$B/ffprobe" -v error -select_streams v:0 -show_entries stream=codec_name,profile,pix_fmt -of default=nw=1 burned.mp4
+
+      - name: Package with SHA-256 and the licence notice
+        shell: bash
+        run: |
+          set -euo pipefail
+          O="$RUNNER_TEMP/out"; P="$RUNNER_TEMP/pkg"; mkdir -p "$P/stage"
+          cp "$O/bin/ffmpeg" "$O/bin/ffprobe" "$P/stage/"
+          cfg=$(grep '^configuration:' "$O/ffmpeg-version.txt" | sed 's/^configuration: //')
+          sed -e "s|{{FFMPEG_VERSION}}|$FFMPEG_VERSION|g" -e "s|{{BUILD_DESCRIPTION}}|built from the official source by NLC on GitHub Actions (${{ matrix.runner }}, ${{ matrix.arch }})|" \
+              -e "s|{{CONFIGURATION_LINE}}|$cfg|" -e "s|{{LGPL_VERSION}}|2.1|g" installer/nlc-node/NOTICE-ffmpeg.txt > "$P/stage/NOTICE-ffmpeg.txt"
+          tar -xOf "$RUNNER_TEMP/src/ffmpeg-$FFMPEG_VERSION.tar.xz" "ffmpeg-$FFMPEG_VERSION/COPYING.LGPLv2.1" > "$P/stage/LICENSE-LGPL-2.1.txt"
+          echo "(fill {{SOURCE_URL}}, {{BUILD_INSTRUCTIONS_URL}}, {{SOURCE_CONTACT}}, {{FFMPEG_FOLDER}} at release time)" > "$P/stage/NOTICE-TODO.txt"
+          NAME="ffmpeg-$FFMPEG_VERSION-darwin-${{ matrix.arch }}-lgpl"
+          tar -C "$P/stage" -czf "$P/$NAME.tar.gz" ffmpeg ffprobe NOTICE-ffmpeg.txt LICENSE-LGPL-2.1.txt
+          (cd "$P" && shasum -a 256 "$NAME.tar.gz" | tee "$NAME.tar.gz.sha256")
+          # Corresponding source (LGPL): the exact tarballs, signature, and configure line.
+          mkdir -p "$P/source" && cp "$RUNNER_TEMP"/src/*.tar.xz "$RUNNER_TEMP"/src/*.asc "$P/source/"
+          echo "$cfg" > "$P/source/configure-line.txt"
+          tar -C "$P" -czf "$P/ffmpeg-$FFMPEG_VERSION-darwin-${{ matrix.arch }}-corresponding-source.tar.gz" source
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-darwin-${{ matrix.arch }}
+          path: ${{ runner.temp }}/pkg/*.tar.gz*
+          if-no-files-found: error
+
+  windows:
+    name: ffmpeg Windows x64 (pinned BtbN LGPL)
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+
+      - name: Fetch and verify with the same script NLC Node builds use
+        shell: pwsh
+        run: |
+          # bsdtar (System32) reads zip; Git's GNU tar does not.
+          $env:PATH = "$env:SystemRoot\System32;$env:PATH"
+          node scripts/nlc-node/fetch-ffmpeg.cjs win32-x64 "$env:RUNNER_TEMP\ffmpeg"
+          # Keep the exact zip too, so we can host it ourselves (BtbN deletes old dated builds).
+          $url = node -e "console.log(require('./scripts/nlc-node/fetch-ffmpeg.cjs').SOURCES['win32-x64'].url)"
+          $name = Split-Path $url -Leaf
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\pkg" | Out-Null
+          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\pkg\$name"
+          $want = node -e "console.log(require('./scripts/nlc-node/fetch-ffmpeg.cjs').SOURCES['win32-x64'].sha256)"
+          $got = (Get-FileHash "$env:RUNNER_TEMP\pkg\$name" -Algorithm SHA256).Hash.ToLower()
+          if ($got -ne $want) { throw "Checksum mismatch for $name" }
+          "$got  $name" | Out-File -Encoding ascii "$env:RUNNER_TEMP\pkg\$name.sha256"
+
+      - name: Licence check and smoke test (version, encoders, filters, trim, burn captions, proxy)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $d = "$env:RUNNER_TEMP\ffmpeg\win32-x64"; $ff = "$d\ffmpeg.exe"; $fp = "$d\ffprobe.exe"
+          $ver = (& $ff -version) -join "`n"; $ver
+          $cfg = ($ver -split "`n" | Where-Object { $_ -like 'configuration:*' })
+          if ($cfg -match '--enable-(gpl|nonfree|libx264|libx265)') { throw "Not an LGPL build: $cfg" }
+          if ($cfg -match '--enable-version3') { Write-Warning "Build uses --enable-version3: licence is LGPL-3.0-or-later, not 2.1. Update NOTICE-ffmpeg.txt." }
+          $enc = (& $ff -hide_banner -encoders) -join "`n"
+          ($enc -split "`n") | Where-Object { $_ -match 'h264|hevc|openh264| aac ' }
+          if ($enc -match ' libx26[45] ') { throw 'x264/x265 present' }
+          # Which H.264 encoders exist in this build is a finding, not a pass/fail, except that at least one must.
+          if ($enc -notmatch 'h264_mf|libopenh264|h264_nvenc|h264_qsv|h264_amf') { throw 'No H.264 encoder at all in this build' }
+          $flt = (& $ff -hide_banner -filters) -join "`n"
+          if ($flt -notmatch ' subtitles ') { throw 'subtitles filter (libass) missing' }
+          $w = "$env:RUNNER_TEMP\smoke"; New-Item -ItemType Directory -Force $w | Out-Null; Set-Location $w
+          $fargs = @('-hide_banner','-loglevel','error','-y')
+          $vc = @('-c:v','h264_mf','-b:v','1M','-pix_fmt','yuv420p')
+          & $ff @fargs -f lavfi -i testsrc2=size=640x360:rate=25 -f lavfi -i sine=frequency=440 -t 6 @vc -c:a aac -shortest in.mp4
+          if ($LASTEXITCODE -ne 0) {
+            Write-Warning 'h264_mf could not encode on this runner (Media Foundation H.264 encoder not available?). Smoke continues with mpeg4. REAL-PC CHECK STILL OWED.'
+            $vc = @('-c:v','mpeg4','-q:v','4')
+            & $ff @fargs -f lavfi -i testsrc2=size=640x360:rate=25 -f lavfi -i sine=frequency=440 -t 6 @vc -c:a aac -shortest in.mp4
+          }
+          & $ff @fargs -ss 1 -to 4 -i in.mp4 @vc -c:a aac trim.mp4
+          $dur = [double](& $fp -v error -show_entries format=duration -of csv=p=0 trim.mp4)
+          if ($dur -lt 2.5 -or $dur -gt 3.6) { throw "trim duration $dur" }
+          Set-Content -Encoding ascii cap.srt "1`n00:00:00,000 --> 00:00:05,000`nHELLO NLC CAPTION`n"
+          & $ff @fargs -i in.mp4 -vf "subtitles=cap.srt:force_style='FontName=Arial,FontSize=28'" @vc -c:a aac burned.mp4
+          if ($LASTEXITCODE -ne 0) { throw 'burning captions failed' }
+          & $ff @fargs -ss 2 -i in.mp4 -frames:v 1 plain.png; & $ff @fargs -ss 2 -i burned.mp4 -frames:v 1 burned.png
+          if ((Get-FileHash plain.png).Hash -eq (Get-FileHash burned.png).Hash) { throw 'captions were not drawn on the frame' }
+          & $ff @fargs -i in.mp4 -vf scale=-2:360 @vc -c:a aac proxy.mp4
+          if ((& $fp -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 proxy.mp4) -ne '360') { throw 'proxy height' }
+          & $fp -v error -select_streams v:0 -show_entries stream=codec_name,profile,pix_fmt -of default=nw=1 burned.mp4
+
+      - name: Corresponding source for the redistributed build
+        shell: pwsh
+        run: |
+          # The BtbN zip name carries the FFmpeg commit (g92611900bb). LGPL needs us to be able to give the source.
+          # BtbN's build scripts (which pin the dependency versions) are saved as of this run; see BUILD-Q1b.md for the residual gap.
+          $p = "$env:RUNNER_TEMP\pkg"
+          Invoke-WebRequest -Uri 'https://github.com/FFmpeg/FFmpeg/archive/92611900bb.tar.gz' -OutFile "$p\ffmpeg-source-92611900bb.tar.gz"
+          Invoke-WebRequest -Uri 'https://github.com/BtbN/FFmpeg-Builds/archive/refs/heads/master.tar.gz' -OutFile "$p\btbn-build-scripts-master-at-run.tar.gz"
+          (& "$env:RUNNER_TEMP\ffmpeg\win32-x64\ffmpeg.exe" -version) | Out-File -Encoding ascii "$p\ffmpeg-version.txt"
+          Get-FileHash "$p\*.tar.gz" -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } | Out-File -Encoding ascii "$p\source.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-win32-x64
+          path: ${{ runner.temp }}/pkg/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish to our release storage
+    if: ${{ inputs.publish_tag != '' }}
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ inputs.publish_tag }}" artifacts/* --repo "${{ github.repository }}" --title "NLC Node ffmpeg (LGPL) ${{ inputs.publish_tag }}" \
+            --notes "LGPL ffmpeg/ffprobe for NLC Node. Folder URL for NLC_FFMPEG_RELEASE_BASE: https://github.com/${{ github.repository }}/releases/download/${{ inputs.publish_tag }}"

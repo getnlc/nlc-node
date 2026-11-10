@@ -1,0 +1,7 @@
+{
+  "main": "generated-at-build-time",
+  "output": "generated-at-build-time",
+  "disableExperimentalSEAWarning": true,
+  "useSnapshot": false,
+  "useCodeCache": false
+}

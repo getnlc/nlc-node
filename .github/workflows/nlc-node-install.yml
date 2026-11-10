@@ -1,0 +1,192 @@
+name: NLC Node one-line install (unsigned)
+
+# Proves the one-line installers on clean GitHub-hosted runners: build the payload, serve it and the scripts from the real
+# server side on a local port, run the line exactly as a customer would, pair, share a folder, let an agent list it through
+# the real MCP server, update by running the line again, uninstall. No secrets are used.
+on:
+  workflow_dispatch:
+  push:
+    branches: [nlc-node-inst, nlc-node-fin]
+
+permissions:
+  contents: read
+
+jobs:
+  # The Mac programs are built in this same run (the Windows ones are fetched, pinned, by the Windows job).
+  ffmpeg-tools:
+    name: ffmpeg for the payloads
+    uses: ./.github/workflows/nlc-node-ffmpeg.yml
+    permissions:
+      contents: write   # the called workflow has a publish job (skipped here); a called workflow may not ask for more than its caller grants
+  whisper-tools:
+    name: whisper-cli for the payloads
+    uses: ./.github/workflows/nlc-node-whisper.yml
+
+  install-macos:
+    needs: [ffmpeg-tools, whisper-tools]
+    name: One-line install on a clean macOS runner (curl | sh)
+    runs-on: macos-14
+    timeout-minutes: 40
+    steps:
+      - name: Check out this candidate
+        uses: actions/checkout@v4
+
+      - name: Use the pinned NLC Node runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+
+      - name: Install pinned build dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Install test dependencies (ws and express for the server side, the MCP SDK for the agent side)
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund --prefix ui
+          npm ci --ignore-scripts --no-audit --no-fund --prefix mcp
+          mkdir -p mcp-gateway
+          ln -s "${GITHUB_WORKSPACE}/mcp/node_modules" mcp-gateway/node_modules
+
+      - name: Test the payload builder and the install routes (real routes, real curl | sh against a stand-in host)
+        run: |
+          node --test tests/nlc-node/payload.test.cjs
+          (cd ui && node --test tests/node-install-routes.test.mjs)
+
+      - name: Get the ffmpeg and whisper-cli built in this run
+        uses: actions/download-artifact@v4
+        with:
+          name: ffmpeg-darwin-arm64
+          path: ${{ runner.temp }}/tools-dl/ffmpeg
+      - name: Get the whisper-cli built in this run
+        uses: actions/download-artifact@v4
+        with:
+          name: whisper-darwin-arm64
+          path: ${{ runner.temp }}/tools-dl/whisper
+
+      - name: Build the app and pack the payload
+        env:
+          NLC_NODE_UPDATE_PUBLIC_KEY_B64: ${{ vars.NLC_NODE_UPDATE_PUBLIC_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          ./installer/nlc-node/macos/build.sh macos-arm64
+          mkdir -p "${RUNNER_TEMP}/tools/ffmpeg" "${RUNNER_TEMP}/tools/whisper"
+          (cd "${RUNNER_TEMP}/tools-dl/ffmpeg" && shasum -a 256 -c *.tar.gz.sha256 && tar -xzf ffmpeg-*-darwin-arm64-lgpl.tar.gz -C "${RUNNER_TEMP}/tools/ffmpeg")
+          (cd "${RUNNER_TEMP}/tools-dl/whisper" && shasum -a 256 -c *.tar.gz.sha256 && tar -xzf whisper-*-darwin-arm64-cpu.tar.gz -C "${RUNNER_TEMP}/tools/whisper")
+          node scripts/nlc-node/build-payload.cjs macos-arm64 --out "${RUNNER_TEMP}/payload" --ffmpeg-dir "${RUNNER_TEMP}/tools/ffmpeg" --whisper-dir "${RUNNER_TEMP}/tools/whisper"
+          ls -l "${RUNNER_TEMP}/payload"
+
+      - name: Run the one line on this clean runner (install, pair, share a folder, agent lists it, update, uninstall)
+        env:
+          NLC_PROOF_EXPECT_TOOLS: '1'
+        run: node tests/nlc-node/e2e/install-proof.cjs --artifacts "${RUNNER_TEMP}/payload" --transcript "${RUNNER_TEMP}/install-macos.txt"
+
+      - name: Upload the macOS install transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NLC-Node-install-macos-transcript
+          path: ${{ runner.temp }}/install-macos.txt
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload the macOS payload
+        uses: actions/upload-artifact@v4
+        with:
+          name: NLC-Node-payload-macos-arm64
+          path: ${{ runner.temp }}/payload/*
+          if-no-files-found: error
+          retention-days: 7
+
+  install-windows:
+    name: One-line install on a clean Windows runner (irm | iex)
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - name: Check out this candidate
+        uses: actions/checkout@v4
+
+      - name: Use the pinned NLC Node runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+
+      - name: Install NSIS (the build script makes the setup program too; the one-line route does not use it)
+        shell: pwsh
+        run: |
+          choco install nsis --no-progress --yes
+          if (-not (Get-Command makensis.exe -ErrorAction SilentlyContinue)) { throw "NSIS did not provide makensis.exe." }
+
+      - name: Install pinned build dependencies
+        shell: pwsh
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Install test dependencies (ws and express for the server side, the MCP SDK for the agent side)
+        shell: pwsh
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund --prefix ui
+          npm ci --ignore-scripts --no-audit --no-fund --prefix mcp
+          New-Item -ItemType Directory -Force -Path mcp-gateway | Out-Null
+          New-Item -ItemType Junction -Path mcp-gateway\node_modules -Target "$env:GITHUB_WORKSPACE\mcp\node_modules" | Out-Null
+
+      - name: Test the payload builder and the install routes
+        shell: pwsh
+        run: |
+          node --test tests/nlc-node/payload.test.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'payload tests failed' }
+          Push-Location ui; node --test tests/node-install-routes.test.mjs; $code = $LASTEXITCODE; Pop-Location
+          if ($code -ne 0) { throw 'install route tests failed' }
+
+      - name: Build the launcher and host, and pack the payload
+        env:
+          NLC_NODE_UPDATE_PUBLIC_KEY_B64: ${{ vars.NLC_NODE_UPDATE_PUBLIC_KEY_B64 }}
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          $installationPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $installationPath) { throw "Visual C++ build tools are unavailable." }
+          $developerCommand = Join-Path $installationPath "Common7\Tools\VsDevCmd.bat"
+          cmd.exe /c "`"$developerCommand`" -arch=x64 && set" | ForEach-Object {
+            if ($_ -match "^(.*?)=(.*)$") { [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process") }
+          }
+          .\installer\nlc-node\windows\build.ps1 -OutputRoot "$env:GITHUB_WORKSPACE\dist\nlc-node\windows-x64"
+          # bsdtar (System32) reads zip; Git's GNU tar does not.
+          $env:PATH = "$env:SystemRoot\System32;$env:PATH"
+          node scripts/nlc-node/fetch-ffmpeg.cjs win32-x64 "$env:RUNNER_TEMP\tools-src\ffmpeg"
+          if ($LASTEXITCODE -ne 0) { throw 'ffmpeg fetch failed' }
+          node scripts/nlc-node/fetch-whisper.cjs win32-x64 "$env:RUNNER_TEMP\tools-src\whisper"
+          if ($LASTEXITCODE -ne 0) { throw 'whisper fetch failed' }
+          node scripts/nlc-node/build-payload.cjs windows-x64 --out "$env:RUNNER_TEMP\payload" --ffmpeg-dir "$env:RUNNER_TEMP\tools-src\ffmpeg\win32-x64" --whisper-dir "$env:RUNNER_TEMP\tools-src\whisper\win32-x64"
+          if ($LASTEXITCODE -ne 0) { throw 'payload build failed' }
+          Get-ChildItem "$env:RUNNER_TEMP\payload" | Format-Table Name, Length
+
+      - name: Check the script is valid PowerShell 5.1 and 7 (parse only)
+        shell: pwsh
+        run: |
+          $text = (node -e "import('./ui/lib/node-download-routes.js').then(m => process.stdout.write(m.renderInstallScript('ps1','https://example.test','')))")
+          Set-Content -Path "$env:RUNNER_TEMP\install.ps1" -Value $text -Encoding utf8
+          foreach ($exe in 'powershell.exe', 'pwsh.exe') {
+            & $exe -NoProfile -Command "`$e=`$null; [void][System.Management.Automation.Language.Parser]::ParseFile('$env:RUNNER_TEMP\install.ps1',[ref]`$null,[ref]`$e); if (`$e) { `$e | ForEach-Object { `$_.Message }; exit 1 }; 'parsed OK with ' + `$PSVersionTable.PSVersion"
+            if ($LASTEXITCODE -ne 0) { throw "$exe could not parse install.ps1" }
+          }
+
+      - name: Run the one line on this clean runner (install, pair, share a folder, agent lists it, update, uninstall)
+        shell: pwsh
+        env:
+          NLC_PROOF_EXPECT_TOOLS: '1'
+        run: node tests/nlc-node/e2e/install-proof.cjs --artifacts "$env:RUNNER_TEMP\payload" --transcript "$env:RUNNER_TEMP\install-windows.txt"
+
+      - name: Upload the Windows install transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NLC-Node-install-windows-transcript
+          path: ${{ runner.temp }}/install-windows.txt
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload the Windows payload
+        uses: actions/upload-artifact@v4
+        with:
+          name: NLC-Node-payload-windows-x64
+          path: ${{ runner.temp }}/payload/*
+          if-no-files-found: error
+          retention-days: 7

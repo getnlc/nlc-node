@@ -1,0 +1,45 @@
+NLC Node - FFmpeg notice
+========================
+
+NLC Node includes the programs "ffmpeg" and "ffprobe" from the FFmpeg project (https://ffmpeg.org).
+They are separate programs. NLC Node starts them like any other command-line tool; they are not part of
+NLC Node's own code.
+
+FFmpeg version: {{FFMPEG_VERSION}}
+Build: {{BUILD_DESCRIPTION}}
+Configuration (as printed by "ffmpeg -version"): {{CONFIGURATION_LINE}}
+
+Licence
+-------
+This FFmpeg is licensed under the GNU Lesser General Public License, version {{LGPL_VERSION}} or (at your option) any
+later version (LGPL). It was built with --disable-gpl and --disable-nonfree: no GPL-only parts
+(for example libx264 or libx265) and no non-free parts are included. The full licence text is in
+LICENSE-LGPL-2.1.txt next to this file and at https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html
+(version 3: https://www.gnu.org/licenses/lgpl-3.0.html).
+
+FFmpeg is a trademark of Fabrice Bellard, originator of the FFmpeg project.
+
+Other libraries inside this build (see the Configuration line above for which are present)
+-----------------------------------------------------------------------------------------
+- libass (subtitle rendering): ISC licence.
+- FreeType: FreeType Licence (FTL). This software is based in part on the work of the FreeType Team.
+- HarfBuzz: MIT licence.
+- FriBidi: LGPL-2.1-or-later.
+- Apple VideoToolbox / AudioToolbox / CoreText (macOS) and Windows Media Foundation (Windows) are parts of the
+  operating system and are used through it; they are not distributed by us.
+
+Source code and your right to change it
+---------------------------------------
+You can get the complete corresponding source code of this FFmpeg build, including the exact build
+instructions, free of charge:
+  Source: {{SOURCE_URL}}
+  Build instructions: {{BUILD_INSTRUCTIONS_URL}}
+or by writing to {{SOURCE_CONTACT}}. This offer is valid for at least three years from the date you received
+NLC Node, and for as long as we distribute this build.
+
+You may replace the bundled ffmpeg and ffprobe with a version you built yourself: put your files in the folder
+  {{FFMPEG_FOLDER}}
+and NLC Node will use them, as long as they are not built with --enable-gpl or --enable-nonfree.
+You may modify FFmpeg and reverse engineer it for debugging such changes.
+
+NO WARRANTY: FFmpeg is provided "as is", without warranty of any kind, as described in the LGPL.

@@ -1,0 +1,132 @@
+name: NLC Node macOS (unsigned)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [nlc-node-ci, nlc-node-fin]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-verify:
+    name: Build and verify unsigned macOS ${{ matrix.target }}
+    runs-on: macos-14
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: macos-arm64
+            verify-args: ""
+          - target: macos-x64
+            # The x64 app is cross-built here. A macOS arm64 runner cannot be assumed to run it, so it gets structure checks only.
+            verify-args: "--structure-only"
+
+    steps:
+      - name: Check out this candidate
+        uses: actions/checkout@v4
+
+      - name: Use the pinned NLC Node runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+
+      - name: Install pinned build dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Check that the candidate holds only NLC Node paths (before any test dependency is linked in)
+        run: npm run nlc:node:boundaries
+
+      - name: Install test dependencies (ws and express for the server side, the MCP SDK for the agent side)
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund --prefix ui
+          npm ci --ignore-scripts --no-audit --no-fund --prefix mcp
+          mkdir -p mcp-gateway
+          ln -s "${GITHUB_WORKSPACE}/mcp/node_modules" mcp-gateway/node_modules
+
+      - name: Install ffmpeg for the video tool tests (test only; the shipped ffmpeg is the LGPL build)
+        run: brew install ffmpeg
+
+      - name: Run the NLC Node tests
+        run: |
+          node --test tests/nlc-node/*.test.cjs
+          node --test tests/nlc-node-mcp.test.mjs tests/nlc-node-mcp-pairing.test.mjs
+          (cd ui && node --test tests/node-backend.test.mjs)
+
+      - name: Fetch the official x64 Node binary for the cross build
+        if: matrix.target == 'macos-x64'
+        run: |
+          set -euo pipefail
+          VERSION=$(node -e "process.stdout.write(require('./installer/nlc-node/release.json').build.nodeVersion)")
+          NAME="node-v${VERSION}-darwin-x64"
+          mkdir -p "${RUNNER_TEMP}/node-x64"
+          cd "${RUNNER_TEMP}/node-x64"
+          curl -fsSLO "https://nodejs.org/dist/v${VERSION}/${NAME}.tar.gz"
+          curl -fsSLO "https://nodejs.org/dist/v${VERSION}/SHASUMS256.txt"
+          grep " ${NAME}.tar.gz\$" SHASUMS256.txt | shasum -a 256 -c -
+          tar -xzf "${NAME}.tar.gz"
+          echo "NLC_NODE_X64_NODE_BINARY=${RUNNER_TEMP}/node-x64/${NAME}/bin/node" >> "${GITHUB_ENV}"
+
+      - name: Build the unsigned app and dmg
+        env:
+          NLC_NODE_UPDATE_PUBLIC_KEY_B64: ${{ vars.NLC_NODE_UPDATE_PUBLIC_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          DMG=$(./installer/nlc-node/macos/build.sh "${{ matrix.target }}" | tail -n 1)
+          echo "NLC_NODE_DMG=${DMG}" >> "${GITHUB_ENV}"
+
+      - name: The dmg has exactly the name the download route serves
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          KEY="mac-${TARGET#macos-}"
+          WANT=$(node --input-type=module -e "const m = await import('./ui/lib/node-download-routes.js'); process.stdout.write(m.ARTIFACTS[process.argv[1]].file)" "$KEY")
+          echo "route serves: ${WANT}; build produced: $(basename "${NLC_NODE_DMG}")"
+          [ "$(basename "${NLC_NODE_DMG}")" = "${WANT}" ] || { echo "::error::the dmg name does not match the download route"; exit 1; }
+
+      - name: Verify the dmg
+        run: ./installer/nlc-node/macos/verify.sh "${NLC_NODE_DMG}" ${{ matrix.verify-args }}
+
+      - name: Upload seven-day macOS test dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: NLC-Node-${{ matrix.target }}-unsigned-test
+          path: dist/nlc-node/${{ matrix.target }}/*.dmg
+          if-no-files-found: error
+          retention-days: 7
+
+  nlc-node-proof-macos:
+    name: Real file-tool proof on macOS (app.cjs against the real server side)
+    runs-on: macos-14
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out this candidate
+        uses: actions/checkout@v4
+
+      - name: Use the pinned NLC Node runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+
+      - name: Install test dependencies (ws and express for the server side, the MCP SDK for the agent side)
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund --prefix ui
+          npm ci --ignore-scripts --no-audit --no-fund --prefix mcp
+          mkdir -p mcp-gateway
+          ln -s "${GITHUB_WORKSPACE}/mcp/node_modules" mcp-gateway/node_modules
+
+      - name: Run the file-tool proof (test folder under RUNNER_TEMP, NLC Trash in a test home)
+        env:
+          NLC_PROOF_ROOT: ${{ runner.temp }}
+        run: node tests/nlc-node/e2e/posix-proof.cjs --transcript "${RUNNER_TEMP}/macos-proof.txt"
+
+      - name: Upload the macOS proof transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NLC-Node-macos-proof-transcript
+          path: ${{ runner.temp }}/macos-proof.txt
+          if-no-files-found: warn
+          retention-days: 7

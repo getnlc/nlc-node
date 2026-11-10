@@ -1,0 +1,168 @@
+name: NLC Node link page and agent reader (unsigned)
+
+# Proves the NLC Node link page: renders it, serves it from the real server side, and lets a SCRIPTED agent reader that holds ONLY the link
+# read the page, check the SHA-256, install with the page's own command, confirm, pair, list a shared folder through the real gateway
+# MCP server, and remove it. A real Claude or Codex given the link is parked (it needs a subscription sign-in secret; none is used here).
+on:
+  workflow_dispatch:
+  push:
+    branches: [nlc-node-link, nlc-node-fin]
+
+permissions:
+  contents: read
+
+jobs:
+  install-macos:
+    name: Link page and agent reader on a clean macOS runner
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - name: Check out this candidate
+        uses: actions/checkout@v4
+
+      - name: Use the pinned NLC Node runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+
+      - name: Install pinned build dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Install test dependencies (ws and express for the server side, the MCP SDK for the agent side)
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund --prefix ui
+          npm ci --ignore-scripts --no-audit --no-fund --prefix mcp
+          mkdir -p mcp-gateway
+          ln -s "${GITHUB_WORKSPACE}/mcp/node_modules" mcp-gateway/node_modules
+
+      - name: Test the payload builder and the install routes (real routes, real curl | sh against a stand-in host)
+        run: |
+          node --test tests/nlc-node/payload.test.cjs tests/nlc-node/link-page.test.cjs
+          (cd ui && node --test tests/node-install-routes.test.mjs tests/node-link-page-routes.test.mjs)
+
+      - name: Build the app and pack the payload
+        env:
+          NLC_NODE_UPDATE_PUBLIC_KEY_B64: ${{ vars.NLC_NODE_UPDATE_PUBLIC_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          ./installer/nlc-node/macos/build.sh macos-arm64
+          node scripts/nlc-node/build-payload.cjs macos-arm64 --out "${RUNNER_TEMP}/payload"
+          ls -l "${RUNNER_TEMP}/payload"
+
+      - name: Run the scripted agent reader with only the link (read, verify, install, confirm, pair, list a folder, remove)
+        run: node tests/nlc-node/e2e/agent-reader-proof.cjs --artifacts "${RUNNER_TEMP}/payload" --transcript "${RUNNER_TEMP}/linkpage-macos.txt"
+
+      - name: Render the public copy of the page with the real checksums (for nexlevelcode.com/node; not deployed)
+        run: node scripts/nlc-node/build-link-page.cjs --out "${RUNNER_TEMP}/link-page" --payload-dir "${RUNNER_TEMP}/payload"
+
+      - name: Upload the public copy of the page
+        uses: actions/upload-artifact@v4
+        with:
+          name: NLC-Node-link-page-public-copy
+          path: ${{ runner.temp }}/link-page/*
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload the macOS agent-reader transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NLC-Node-linkpage-macos-transcript
+          path: ${{ runner.temp }}/linkpage-macos.txt
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload the macOS payload
+        uses: actions/upload-artifact@v4
+        with:
+          name: NLC-Node-payload-macos-arm64
+          path: ${{ runner.temp }}/payload/*
+          if-no-files-found: error
+          retention-days: 7
+
+  install-windows:
+    name: Link page and agent reader on a clean Windows runner
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - name: Check out this candidate
+        uses: actions/checkout@v4
+
+      - name: Use the pinned NLC Node runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+
+      - name: Install NSIS (the build script makes the setup program too; the one-line route does not use it)
+        shell: pwsh
+        run: |
+          choco install nsis --no-progress --yes
+          if (-not (Get-Command makensis.exe -ErrorAction SilentlyContinue)) { throw "NSIS did not provide makensis.exe." }
+
+      - name: Install pinned build dependencies
+        shell: pwsh
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Install test dependencies (ws and express for the server side, the MCP SDK for the agent side)
+        shell: pwsh
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund --prefix ui
+          npm ci --ignore-scripts --no-audit --no-fund --prefix mcp
+          New-Item -ItemType Directory -Force -Path mcp-gateway | Out-Null
+          New-Item -ItemType Junction -Path mcp-gateway\node_modules -Target "$env:GITHUB_WORKSPACE\mcp\node_modules" | Out-Null
+
+      - name: Test the payload builder and the install routes
+        shell: pwsh
+        run: |
+          node --test tests/nlc-node/payload.test.cjs tests/nlc-node/link-page.test.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'payload and link page tests failed' }
+          Push-Location ui; node --test tests/node-install-routes.test.mjs tests/node-link-page-routes.test.mjs; $code = $LASTEXITCODE; Pop-Location
+          if ($code -ne 0) { throw 'install route tests failed' }
+
+      - name: Build the launcher and host, and pack the payload
+        env:
+          NLC_NODE_UPDATE_PUBLIC_KEY_B64: ${{ vars.NLC_NODE_UPDATE_PUBLIC_KEY_B64 }}
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          $installationPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $installationPath) { throw "Visual C++ build tools are unavailable." }
+          $developerCommand = Join-Path $installationPath "Common7\Tools\VsDevCmd.bat"
+          cmd.exe /c "`"$developerCommand`" -arch=x64 && set" | ForEach-Object {
+            if ($_ -match "^(.*?)=(.*)$") { [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process") }
+          }
+          .\installer\nlc-node\windows\build.ps1 -OutputRoot "$env:GITHUB_WORKSPACE\dist\nlc-node\windows-x64"
+          node scripts/nlc-node/build-payload.cjs windows-x64 --out "$env:RUNNER_TEMP\payload"
+          if ($LASTEXITCODE -ne 0) { throw 'payload build failed' }
+          Get-ChildItem "$env:RUNNER_TEMP\payload" | Format-Table Name, Length
+
+      - name: Check the script is valid PowerShell 5.1 and 7 (parse only)
+        shell: pwsh
+        run: |
+          $text = (node -e "import('./ui/lib/node-download-routes.js').then(m => process.stdout.write(m.renderInstallScript('ps1','https://example.test','')))")
+          Set-Content -Path "$env:RUNNER_TEMP\install.ps1" -Value $text -Encoding utf8
+          foreach ($exe in 'powershell.exe', 'pwsh.exe') {
+            & $exe -NoProfile -Command "`$e=`$null; [void][System.Management.Automation.Language.Parser]::ParseFile('$env:RUNNER_TEMP\install.ps1',[ref]`$null,[ref]`$e); if (`$e) { `$e | ForEach-Object { `$_.Message }; exit 1 }; 'parsed OK with ' + `$PSVersionTable.PSVersion"
+            if ($LASTEXITCODE -ne 0) { throw "$exe could not parse install.ps1" }
+          }
+
+      - name: Run the scripted agent reader with only the link (read, verify, install, confirm, pair, list a folder, remove)
+        shell: pwsh
+        run: node tests/nlc-node/e2e/agent-reader-proof.cjs --artifacts "$env:RUNNER_TEMP\payload" --transcript "$env:RUNNER_TEMP\linkpage-windows.txt"
+
+      - name: Upload the Windows agent-reader transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NLC-Node-linkpage-windows-transcript
+          path: ${{ runner.temp }}/linkpage-windows.txt
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload the Windows payload
+        uses: actions/upload-artifact@v4
+        with:
+          name: NLC-Node-payload-windows-x64
+          path: ${{ runner.temp }}/payload/*
+          if-no-files-found: error
+          retention-days: 7

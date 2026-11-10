@@ -1,0 +1,121 @@
+name: NLC Node Windows (unsigned)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [nlc-node-ci, nlc-node-fin]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-verify:
+    name: Build and verify unsigned Windows installer
+    runs-on: windows-2022
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out this candidate
+        uses: actions/checkout@v4
+
+      - name: Use the pinned NLC Node runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          choco install nsis --no-progress --yes
+          $nsis = Get-Command makensis.exe -ErrorAction SilentlyContinue
+          if (-not $nsis) { throw "NSIS did not provide makensis.exe." }
+          & $nsis.Source /VERSION
+          if ($LASTEXITCODE -ne 0) { throw "NSIS could not report its version." }
+
+      - name: Install pinned build dependencies
+        shell: pwsh
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Install test dependencies (ws and express for the server side, the MCP SDK for the agent side)
+        shell: pwsh
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund --prefix ui
+          npm ci --ignore-scripts --no-audit --no-fund --prefix mcp
+          New-Item -ItemType Directory -Force -Path mcp-gateway | Out-Null
+          New-Item -ItemType Junction -Path mcp-gateway\node_modules -Target "$env:GITHUB_WORKSPACE\mcp\node_modules" | Out-Null
+
+      - name: Verify NLC Node source
+        shell: pwsh
+        run: |
+          npm run nlc:node:test
+          npm run nlc:node:boundaries
+          node --test tests/nlc-node-mcp.test.mjs tests/nlc-node-mcp-pairing.test.mjs
+          Push-Location ui; node --test tests/node-backend.test.mjs; Pop-Location
+          if ($LASTEXITCODE -ne 0) { throw 'tests failed' }
+
+      - name: Windows file-tool proof (real Windows rules, junction, DPAPI, NLC Trash in a test home)
+        shell: pwsh
+        run: node tests/nlc-node/e2e/windows-proof.cjs --transcript "$env:RUNNER_TEMP\windows-proof.txt"
+
+      - name: Upload the Windows proof transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NLC-Node-windows-proof-transcript
+          path: ${{ runner.temp }}/windows-proof.txt
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Fetch the pinned video and captioning programs and lay them out for the setup program
+        shell: pwsh
+        run: |
+          # bsdtar (System32) reads zip; Git's GNU tar does not.
+          $env:PATH = "$env:SystemRoot\System32;$env:PATH"
+          node scripts/nlc-node/fetch-ffmpeg.cjs win32-x64 "$env:RUNNER_TEMP\tools-src\ffmpeg"
+          if ($LASTEXITCODE -ne 0) { throw 'ffmpeg fetch failed' }
+          node scripts/nlc-node/fetch-whisper.cjs win32-x64 "$env:RUNNER_TEMP\tools-src\whisper"
+          if ($LASTEXITCODE -ne 0) { throw 'whisper fetch failed' }
+          node scripts/nlc-node/build-payload.cjs windows-x64 --stage-tools "$env:RUNNER_TEMP\tools" --ffmpeg-dir "$env:RUNNER_TEMP\tools-src\ffmpeg\win32-x64" --whisper-dir "$env:RUNNER_TEMP\tools-src\whisper\win32-x64"
+          if ($LASTEXITCODE -ne 0) { throw 'staging the tools failed' }
+          Get-ChildItem -Recurse "$env:RUNNER_TEMP\tools" -File | Format-Table FullName, Length
+
+      - name: Build the unsigned Windows test installer
+        env:
+          NLC_NODE_UPDATE_PUBLIC_KEY_B64: ${{ vars.NLC_NODE_UPDATE_PUBLIC_KEY_B64 }}
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "Visual Studio discovery is unavailable." }
+          $installationPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $installationPath) { throw "Visual C++ build tools are unavailable." }
+          $developerCommand = Join-Path $installationPath "Common7\Tools\VsDevCmd.bat"
+          if (-not (Test-Path $developerCommand)) { throw "Visual C++ developer command is unavailable." }
+          cmd.exe /c "`"$developerCommand`" -arch=x64 && set" | ForEach-Object {
+            if ($_ -match "^(.*?)=(.*)$") { [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process") }
+          }
+          .\installer\nlc-node\windows\build.ps1 -OutputRoot "$env:GITHUB_WORKSPACE\dist\nlc-node\windows-x64" -ToolsDir "$env:RUNNER_TEMP\tools"
+
+      - name: Verify the unsigned Windows installation
+        shell: pwsh
+        run: |
+          $name = (node lib/nlc-node/artifact-names.cjs setup).Trim()
+          .\installer\nlc-node\windows\verify.ps1 -InstallerPath "$env:GITHUB_WORKSPACE\dist\nlc-node\windows-x64\$name" -ExpectTools
+
+      - name: Diagnose a failed Windows verification (state files, processes, a manual stop)
+        if: failure()
+        shell: pwsh
+        run: |
+          $state = Join-Path $env:LOCALAPPDATA 'NLC Node'
+          Get-ChildItem $state -Force -ErrorAction SilentlyContinue | Format-Table Name, Length, LastWriteTime
+          foreach ($f in 'ready.json','endpoint.json','stop.request','indicator.json') { $p = Join-Path $state $f; if (Test-Path $p) { "--- $f"; Get-Content -Raw $p } }
+          Get-Process -Name 'NLC Node*' -ErrorAction SilentlyContinue | Format-Table Id, ProcessName, Path
+          $hostExe = Join-Path $env:LOCALAPPDATA 'Programs\NLC Node\NLC Node Host.exe'
+          if (Test-Path $hostExe) { & $hostExe --stop; "manual --stop exit code: $LASTEXITCODE"; Get-Content -Raw (Join-Path $state 'ready.json') }
+
+      - name: Upload seven-day Windows test installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: NLC-Node-Windows-x64-unsigned-test
+          path: dist/nlc-node/windows-x64/NLC-Node-Setup-x64.exe
+          if-no-files-found: error
+          retention-days: 7

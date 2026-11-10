@@ -1,0 +1,14 @@
+{
+  "product": "NLC Node",
+  "version": "0.1.0",
+  "channel": "preview",
+  "build": {
+    "nodeVersion": "22.22.3",
+    "postjectVersion": "1.0.0-alpha.6"
+  },
+  "targets": [
+    "windows-x64",
+    "macos-arm64",
+    "macos-x64"
+  ]
+}

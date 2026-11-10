@@ -1,0 +1,124 @@
+name: NLC Node whisper.cpp (MIT)
+
+# Builds the whisper.cpp command line program that NLC Node bundles for macOS (the official project publishes no macOS command line binary,
+# only an xcframework), and smoke-tests the official Windows x64 zip that scripts/nlc-node/fetch-whisper.cjs pins. Manual only.
+#   macOS (arm64 + x64): built from the tagged source with plain cmake, CPU only, static, not tuned to the runner's CPU.
+#   Windows (x64):       fetch-whisper.cjs installs the pinned official zip; the job then transcribes a real speech sample with it.
+# Output: artifacts (tar.gz + .sha256). Optional publish to a GitHub Release = our storage; that release folder URL becomes
+# NLC_WHISPER_RELEASE_BASE and the printed hashes become NLC_WHISPER_DARWIN_*_SHA256 for scripts/nlc-node/fetch-whisper.cjs.
+
+on:
+  push:
+    branches: [nlc-node-ci, nlc-node-fin]
+    paths:
+      - .github/workflows/nlc-node-whisper.yml
+      - scripts/nlc-node/fetch-whisper.cjs
+  # Called by the one-line install workflow so its payloads carry the whisper-cli built in the same run.
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      publish_tag:
+        description: "Release tag to publish the artifacts to (empty = artifacts only), e.g. whisper-1.9.5-1"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  WHISPER_VERSION: "1.9.5"
+  # Commit that the tag v1.9.5 points to (git ls-remote, 24 Oct 2026). The build fails if the tag moves.
+  WHISPER_COMMIT: "d1be6fde11ac6e0407606b4e42fe72d34add8037"
+  # Smoke-test inputs: tiny English model (LFS SHA-256 from huggingface.co/ggerganov/whisper.cpp) and the project's own 11 s speech sample.
+  SMOKE_MODEL_URL: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin"
+  SMOKE_MODEL_SHA256: "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f"
+
+jobs:
+  macos:
+    name: whisper-cli macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-14
+          - arch: x64
+            runner: macos-15-intel
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
+    steps:
+      - name: Get the source at the pinned commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch "v$WHISPER_VERSION" https://github.com/ggml-org/whisper.cpp "$RUNNER_TEMP/whisper.cpp"
+          got=$(git -C "$RUNNER_TEMP/whisper.cpp" rev-parse HEAD)
+          [ "$got" = "$WHISPER_COMMIT" ] || { echo "::error::tag v$WHISPER_VERSION is $got, expected $WHISPER_COMMIT"; exit 1; }
+
+      - name: Build (cmake, CPU only, static)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/whisper.cpp"
+          # GGML_NATIVE=OFF: do not tune to the runner's CPU, so the binary runs on any Mac of this architecture.
+          # GGML_METAL=OFF: CPU only, nothing that needs a GPU. Accelerate (a system framework) is used for the maths.
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF -DGGML_METAL=OFF \
+            -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET"
+          cmake --build build --config Release -j"$(sysctl -n hw.ncpu)" --target whisper-cli
+          strip -x build/bin/whisper-cli
+          bad=$(otool -L build/bin/whisper-cli | tail -n +2 | awk '{print $1}' | grep -Ev '^(/usr/lib/|/System/Library/)' || true)
+          [ -z "$bad" ] || { echo "::error::whisper-cli links a non-system library: $bad"; exit 1; }
+          lipo -info build/bin/whisper-cli
+
+      - name: Smoke test on real speech (flags NLC Node uses)
+        shell: bash
+        run: |
+          set -euo pipefail
+          W="$RUNNER_TEMP/smoke"; mkdir -p "$W"; cd "$W"
+          curl -fsSL --retry 3 -o model.bin "$SMOKE_MODEL_URL"
+          [ "$(shasum -a 256 model.bin | cut -d' ' -f1)" = "$SMOKE_MODEL_SHA256" ] || { echo "::error::model checksum"; exit 1; }
+          cp "$RUNNER_TEMP/whisper.cpp/samples/jfk.wav" .
+          B="$RUNNER_TEMP/whisper.cpp/build/bin/whisper-cli"
+          "$B" -m model.bin -f jfk.wav -l en -t 2 -osrt -of out -pp -ml 42 -sow
+          grep -q -- '-->' out.srt && grep -qi 'country' out.srt || { echo "::error::no captions with the expected words"; cat out.srt; exit 1; }
+          "$B" -m model.bin -f jfk.wav -l en -t 2 -osrt -of words -ml 1 -sow >/dev/null 2>&1
+          [ "$(grep -c -- '-->' words.srt)" -gt 15 ] || { echo "::error::word level gave too few cues"; exit 1; }
+
+      - name: Package with SHA-256 and the licence
+        shell: bash
+        run: |
+          set -euo pipefail
+          P="$RUNNER_TEMP/pkg"; mkdir -p "$P/stage"
+          cp "$RUNNER_TEMP/whisper.cpp/build/bin/whisper-cli" "$P/stage/"
+          cp "$RUNNER_TEMP/whisper.cpp/LICENSE" "$P/stage/LICENSE-whisper.cpp-MIT.txt"
+          NAME="whisper-$WHISPER_VERSION-darwin-${{ matrix.arch }}-cpu"
+          tar -C "$P/stage" -czf "$P/$NAME.tar.gz" whisper-cli LICENSE-whisper.cpp-MIT.txt
+          (cd "$P" && shasum -a 256 "$NAME.tar.gz" | tee "$NAME.tar.gz.sha256")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: whisper-darwin-${{ matrix.arch }}
+          path: ${{ runner.temp }}/pkg/*.tar.gz*
+          if-no-files-found: error
+
+  windows:
+    name: whisper-cli Windows x64 (pinned official zip)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install with fetch-whisper.cjs (checks the pinned SHA-256)
+        shell: bash
+        run: node scripts/nlc-node/fetch-whisper.cjs win32-x64 "$RUNNER_TEMP/whisper"
+      - name: Smoke test on real speech
+        shell: bash
+        run: |
+          set -euo pipefail
+          W="$RUNNER_TEMP/smoke"; mkdir -p "$W"; cd "$W"
+          curl -fsSL --retry 3 -o model.bin "$SMOKE_MODEL_URL"
+          [ "$(sha256sum model.bin | cut -d' ' -f1)" = "$SMOKE_MODEL_SHA256" ] || { echo "::error::model checksum"; exit 1; }
+          curl -fsSL --retry 3 -o jfk.wav "https://raw.githubusercontent.com/ggml-org/whisper.cpp/v$WHISPER_VERSION/samples/jfk.wav"
+          B="$RUNNER_TEMP/whisper/win32-x64/whisper-cli.exe"
+          "$B" -m model.bin -f jfk.wav -l en -t 2 -osrt -of out -pp -ml 42 -sow
+          grep -q -- '-->' out.srt && grep -qi 'country' out.srt || { echo "::error::no captions with the expected words"; cat out.srt; exit 1; }
