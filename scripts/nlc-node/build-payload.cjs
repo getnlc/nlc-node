@@ -125,7 +125,7 @@ function stageTools({ target, outDir, resourcesDir = '', ffmpegDir, whisperDir, 
   return outDir;
 }
 
-function buildPayload({ target, outputDir, appDir, launcherPath, hostPath, ffmpegDir, whisperDir, noticeDir = NOTICE_DIR, sign = true, centralTransportDir, centralRuntimePath } = {}) {
+function buildPayload({ target, outputDir, appDir, launcherPath, hostPath, ffmpegDir, whisperDir, raeaDir, noticeDir = NOTICE_DIR, sign = true, centralTransportDir, centralRuntimePath } = {}) {
   if (!PAYLOAD_NAMES[target]) throw new Error('NLC Node payloads exist for macos-arm64, macos-x64 or windows-x64.');
   fs.mkdirSync(outputDir, { recursive: true });
   const file = path.join(outputDir, PAYLOAD_NAMES[target]);
