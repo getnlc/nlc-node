@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   macos:
-    name: Mac payload: connects, takes an update notice, updates
+    name: "Mac payload connects, takes an update notice, updates"
     runs-on: macos-15
     timeout-minutes: 45
     steps:
