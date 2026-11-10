@@ -13,7 +13,7 @@ permissions:
 jobs:
   macos:
     name: macOS menu-bar window (compile, launch, popover)
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
@@ -43,7 +43,7 @@ jobs:
 
   windows:
     name: Windows tray window (install, launch, window)
-    runs-on: windows-latest
+    runs-on: windows-2022
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
