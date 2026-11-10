@@ -257,7 +257,7 @@ test('U01: every colour in the window is a colour from the NLC token map (or an 
   if (fs.existsSync(productCss)) {
     // The product now keeps its colours in numbered --k-* tokens across the css folder; a window colour must be one of them.
     const cssFolder = path.dirname(productCss);
-    const mapFiles = [productCss, path.join(cssFolder, 'themes', 'dark.css')].filter((f) => fs.existsSync(f));
+    const mapFiles = [productCss, path.join(cssFolder, 'themes', 'dark.css'), path.join(cssFolder, 'themes', 'light.css')].filter((f) => fs.existsSync(f));
     const product = mapFiles.map((f) => fs.readFileSync(f, 'utf8')).join('\n').toLowerCase();
     for (const [name, value] of declarations(tokensCss).filter(([n]) => n.startsWith('--'))) {
       const literal = /^#[0-9a-f]{3,8}$/i.test(value.trim());

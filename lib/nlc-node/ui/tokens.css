@@ -1,10 +1,10 @@
-/* Colour tokens for the Node window. Light by default; dark when the system is dark. Colours only; the window adds no colours of its own. */
+/* Colour tokens for the Node window. Light by default (NLC's own light theme colours); dark when the system is dark. Colours only; the window adds no colours of its own. */
 :root {
   color-scheme: light dark;
-  --bg: #f5f6f8; --surface: #ffffff; --border: #d0d7de;
-  --text: #1f2328; --text-dim: #59636e; --accent: #0969da;
-  --accent-dim: #0969da; --on-accent: #ffffff; --danger: #cf222e; --success: #1a7f37;
-  --track: #8c959f; --knob: #ffffff;
+  --bg: #f6f5f2; --surface: #fbfaf8; --border: #dcdad6;
+  --text: #2c2c2b; --text-dim: #6b6964; --accent: #105fad;
+  --accent-dim: #105fad; --on-accent: #ffffff; --danger: #cd3c3a; --success: #3b7455;
+  --track: #85827d; --knob: #fbfaf8;
 }
 @media (prefers-color-scheme: dark) {
   :root {
