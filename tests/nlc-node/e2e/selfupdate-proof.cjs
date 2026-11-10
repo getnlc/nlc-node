@@ -119,6 +119,7 @@ function makeNewerBuild(oldPayload, newPayload) {
   const unpack = spawnSync(tar, [isWin ? '-xf' : '-xzf', oldPayload, '-C', work], { encoding: 'utf8' });
   if (unpack.status !== 0) throw new Error('could not unpack the old payload: ' + tail(unpack.stderr));
   const marker = isWin ? path.join(work, 'build-b.txt') : path.join(work, 'NLC Node.app', 'Contents', 'Resources', 'build-b.txt');
+  fs.mkdirSync(path.dirname(marker), { recursive: true });
   fs.writeFileSync(marker, 'newer build\n');
   const pack = isWin ? spawnSync(tar, ['-a', '-cf', newPayload, '-C', work, '.'], { encoding: 'utf8' }) : spawnSync(tar, ['-czf', newPayload, '-C', work, '.'], { encoding: 'utf8' });
   if (pack.status !== 0) throw new Error('could not pack the newer payload: ' + tail(pack.stderr));
