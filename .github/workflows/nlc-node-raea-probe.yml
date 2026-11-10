@@ -24,7 +24,7 @@ jobs:
           New-Item -ItemType Directory x | Out-Null; tar -xf $f -C x
           $r = (Resolve-Path x\raea).Path
           choco install vulkan-sdk -y --no-progress 2>&1 | Select -Last 3
-          $ldr = (Get-ChildItem C:VulkanSDK -Recurse -Filter vulkan-1.dll | Where-Object { $_.FullName -match "Bin" } | Select -First 1).FullName; $ldr
+          $ldr = (Get-ChildItem C:/VulkanSDK -Recurse -Filter vulkan-1.dll | Where-Object { $_.FullName -match "Bin" } | Select -First 1).FullName; $ldr
           $env:PATH = (Split-Path $ldr) + ";" + $env:PATH
           Invoke-WebRequest https://github.com/pal1000/mesa-dist-win/releases/download/26.2.6/mesa3d-26.2.6-release-msvc.7z -OutFile mesa.7z
           (Get-FileHash mesa.7z -Algorithm SHA256).Hash.ToLower()
