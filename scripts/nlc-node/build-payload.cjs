@@ -107,6 +107,8 @@ function planExtras({ target, ffmpegDir, whisperDir, noticeDir = NOTICE_DIR, cen
 
 // For the Windows setup program: copies the same layout into a folder the installer packs (nothing else is staged).
 function stageTools({ target, outDir, resourcesDir = '', ffmpegDir, whisperDir, noticeDir, centralTransportDir, centralRuntimePath }) {
+  // The folder always exists afterwards, even when a build has nothing to stage (no media tools, no Central transport), so the setup program can pack it.
+  fs.mkdirSync(outDir, { recursive: true });
   for (const e of planExtras({ target, ffmpegDir, whisperDir, noticeDir, centralTransportDir, centralRuntimePath })) {
     // Data files (licence texts, the Central transport) go to the app's Resources folder when one is given; only programs sit beside the host.
     const to = path.join((e.notice || e.resource) && resourcesDir ? resourcesDir : outDir, e.rel);
