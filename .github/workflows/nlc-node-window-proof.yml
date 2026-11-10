@@ -22,16 +22,18 @@ jobs:
           node-version: 22.22.3
       - name: Install build dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install ffmpeg for the video tool tests (test only; the shipped ffmpeg is the LGPL build)
+        run: brew install ffmpeg
       - name: Run the NLC Node tests that need no other part of NLC
         continue-on-error: true
         run: node --test tests/nlc-node/*.test.cjs
       - name: Build the unsigned app and dmg (compiles the Swift launcher)
         run: |
           set -euo pipefail
-          DMG=$(./installer/nlc-node/macos/build.sh macos-arm64 | tail -n 1)
+          DMG=$(bash ./installer/nlc-node/macos/build.sh macos-arm64 | tail -n 1)
           echo "NLC_NODE_DMG=${DMG}" >> "${GITHUB_ENV}"
       - name: Open the app and prove the menu-bar window opens, in light and dark
-        run: ./installer/nlc-node/macos/window-proof.sh "${NLC_NODE_DMG}" "${RUNNER_TEMP}/shots"
+        run: bash ./installer/nlc-node/macos/window-proof.sh "${NLC_NODE_DMG}" "${RUNNER_TEMP}/shots"
       - name: Keep the screenshots
         if: always()
         uses: actions/upload-artifact@v4
