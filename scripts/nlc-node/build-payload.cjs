@@ -65,7 +65,7 @@ function fillFfmpegNotice(template, versionText) {
 }
 
 // The files that travel beside the host program: { rel: path inside the program folder, from: file, run: needs to be runnable, notice: licence text }.
-function planExtras({ target, ffmpegDir, whisperDir, noticeDir = NOTICE_DIR, centralTransportDir, centralRuntimePath }) {
+function planExtras({ target, ffmpegDir, whisperDir, raeaDir, noticeDir = NOTICE_DIR, centralTransportDir, centralRuntimePath }) {
   const isWin = target === 'windows-x64';
   const exe = isWin ? '.exe' : '';
   const nodeTarget = NODE_TARGET[target];
@@ -101,15 +101,22 @@ function planExtras({ target, ffmpegDir, whisperDir, noticeDir = NOTICE_DIR, cen
     }
     extras.push({ rel: name, from, data, notice: true });
   }
+  // raea: its own release archive and raea.json (version, checksum); the Node unpacks it into ~/.raea (lib/nlc-node/raea-install.cjs).
+  raeaDir = raeaDir || process.env.NLC_NODE_RAEA_DIR || ''; // every build route (dmg, setup program, payload) picks the same fetched folder up
+  if (raeaDir && fs.existsSync(path.join(raeaDir, 'raea.json'))) {
+    const info = JSON.parse(fs.readFileSync(path.join(raeaDir, 'raea.json'), 'utf8'));
+    extras.push({ rel: 'raea/raea.json', from: path.join(raeaDir, 'raea.json'), resource: true });
+    extras.push({ rel: 'raea/' + info.archive, from: path.join(raeaDir, info.archive), resource: true });
+  }
   extras.push(...planCentralPackage({ centralTransportDir, centralRuntimePath, target }));
   return extras;
 }
 
 // For the Windows setup program: copies the same layout into a folder the installer packs (nothing else is staged).
-function stageTools({ target, outDir, resourcesDir = '', ffmpegDir, whisperDir, noticeDir, centralTransportDir, centralRuntimePath }) {
+function stageTools({ target, outDir, resourcesDir = '', ffmpegDir, whisperDir, raeaDir, noticeDir, centralTransportDir, centralRuntimePath }) {
   // The folder always exists afterwards, even when a build has nothing to stage (no media tools, no Central transport), so the setup program can pack it.
   fs.mkdirSync(outDir, { recursive: true });
-  for (const e of planExtras({ target, ffmpegDir, whisperDir, noticeDir, centralTransportDir, centralRuntimePath })) {
+  for (const e of planExtras({ target, ffmpegDir, whisperDir, raeaDir, noticeDir, centralTransportDir, centralRuntimePath })) {
     // Data files (licence texts, the Central transport) go to the app's Resources folder when one is given; only programs sit beside the host.
     const to = path.join((e.notice || e.resource) && resourcesDir ? resourcesDir : outDir, e.rel);
     fs.mkdirSync(path.dirname(to), { recursive: true });
@@ -122,7 +129,7 @@ function buildPayload({ target, outputDir, appDir, launcherPath, hostPath, ffmpe
   if (!PAYLOAD_NAMES[target]) throw new Error('NLC Node payloads exist for macos-arm64, macos-x64 or windows-x64.');
   fs.mkdirSync(outputDir, { recursive: true });
   const file = path.join(outputDir, PAYLOAD_NAMES[target]);
-  const extras = planExtras({ target, ffmpegDir, whisperDir, noticeDir, centralTransportDir, centralRuntimePath });
+  const extras = planExtras({ target, ffmpegDir, whisperDir, raeaDir, noticeDir, centralTransportDir, centralRuntimePath });
   if (target === 'windows-x64') {
     if (!launcherPath || !hostPath || !fs.existsSync(launcherPath) || !fs.existsSync(hostPath)) throw new Error('Build the Windows installer parts first (the launcher and the host); they were not found.');
     const entries = [
@@ -162,7 +169,7 @@ if (require.main === module) {
   const dist = path.join(root, 'dist', 'nlc-node', target || '');
   try {
     if (opt('--stage-tools', '')) {
-      process.stdout.write(`${stageTools({ target, outDir: path.resolve(opt('--stage-tools', '')), resourcesDir: opt('--stage-resources', '') ? path.resolve(opt('--stage-resources', '')) : '', ffmpegDir: opt('--ffmpeg-dir', ''), whisperDir: opt('--whisper-dir', ''), centralTransportDir: opt('--central-transport-dir', process.env.NLC_NODE_WITHOUT_CENTRAL_TRANSPORT === '1' ? '' : path.join(root, 'packages', 'nlc-central-transport')), centralRuntimePath: opt('--central-runtime', process.execPath) })}\n`);
+      process.stdout.write(`${stageTools({ target, outDir: path.resolve(opt('--stage-tools', '')), resourcesDir: opt('--stage-resources', '') ? path.resolve(opt('--stage-resources', '')) : '', ffmpegDir: opt('--ffmpeg-dir', ''), whisperDir: opt('--whisper-dir', ''), raeaDir: opt('--raea-dir', ''), centralTransportDir: opt('--central-transport-dir', process.env.NLC_NODE_WITHOUT_CENTRAL_TRANSPORT === '1' ? '' : path.join(root, 'packages', 'nlc-central-transport')), centralRuntimePath: opt('--central-runtime', process.execPath) })}\n`);
       return;
     }
     const result = buildPayload({
@@ -171,7 +178,7 @@ if (require.main === module) {
       launcherPath: path.join(dist, 'NLC Node.exe'),
       hostPath: path.join(dist, 'host', 'NLC Node Host.exe'),
       ffmpegDir: opt('--ffmpeg-dir', ''),
-      whisperDir: opt('--whisper-dir', ''), centralTransportDir: opt('--central-transport-dir', process.env.NLC_NODE_WITHOUT_CENTRAL_TRANSPORT === '1' ? '' : path.join(root, 'packages', 'nlc-central-transport')), centralRuntimePath: opt('--central-runtime', process.execPath),
+      whisperDir: opt('--whisper-dir', ''), raeaDir: opt('--raea-dir', ''), centralTransportDir: opt('--central-transport-dir', process.env.NLC_NODE_WITHOUT_CENTRAL_TRANSPORT === '1' ? '' : path.join(root, 'packages', 'nlc-central-transport')), centralRuntimePath: opt('--central-runtime', process.execPath),
     });
     process.stdout.write(`${result.file}\n`);
   } catch (error) { process.stderr.write(`${error.message}\n`); process.exitCode = 1; }

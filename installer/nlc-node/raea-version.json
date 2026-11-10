@@ -1,0 +1,9 @@
+{
+  "tag": "v0.1.1-rc2",
+  "version": "0.1.1-rc2",
+  "release": "https://github.com/shinyobjectz/raea/releases/download/v0.1.1-rc2",
+  "assets": {
+    "win32-x64": "raea-0.1.1-rc2-windows-x86_64.zip",
+    "darwin-arm64": "raea-0.1.1-rc2-macos-arm64.tar.gz"
+  }
+}

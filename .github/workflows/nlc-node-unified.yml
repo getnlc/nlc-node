@@ -1,0 +1,151 @@
+name: NLC Node unified build (unsigned)
+
+# One build of NLC Node that carries everything: the tray/menu-bar window, the folder fixes, self-update, and raea.
+# Builds the Mac (Apple chip and Intel) and Windows downloads on standard GitHub-hosted runners, proves a connected Node takes
+# an update notice and updates itself, proves raea is in the payload and runs once the Node has put it in place,
+# and uploads the files that are published (payloads, setup program, dmgs, each with its .sha256).
+# Throwaway update key; the private Central transport is not part of this public build; no secrets.
+on:
+  workflow_dispatch:
+  push:
+    branches: [unified]
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: "Mac ${{ matrix.arch }}"
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+      - name: Install build dependencies
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm install --prefix ui --no-audit --no-fund --ignore-scripts
+      - name: Unit tests (tray window, folders, raea step)
+        run: node --test tests/nlc-node/tray-app.test.cjs tests/nlc-node/raea-install.test.cjs tests/nlc-node/grants-follow.test.cjs tests/nlc-node/grants.test.cjs tests/nlc-node/path-guard.test.cjs tests/nlc-node/dispatcher.test.cjs
+      - name: Make a throwaway update key for this test build
+        run: |
+          node -e "const c=require('crypto');const k=c.generateKeyPairSync('ed25519');console.log('NLC_NODE_UPDATE_PUBLIC_KEY_B64='+k.publicKey.export({format:'der',type:'spki'}).toString('base64'))" >> "${GITHUB_ENV}"
+          echo "NLC_NODE_WITHOUT_CENTRAL_TRANSPORT=1" >> "${GITHUB_ENV}"
+      - name: Fetch the pinned raea release (checked against its published checksum)
+        run: |
+          node scripts/nlc-node/fetch-raea.cjs darwin-${{ matrix.arch }} "${RUNNER_TEMP}/raea"
+          if [ -f "${RUNNER_TEMP}/raea/raea.json" ]; then echo "NLC_NODE_RAEA_DIR=${RUNNER_TEMP}/raea" >> "${GITHUB_ENV}"; fi
+      - name: Build the app and dmg, and pack the payload
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/out"
+          DMG=$(bash ./installer/nlc-node/macos/build.sh macos-${{ matrix.arch }} | tail -n 1)
+          cp "${DMG}" "${RUNNER_TEMP}/out/"
+          node scripts/nlc-node/build-payload.cjs macos-${{ matrix.arch }} --out "${RUNNER_TEMP}/out"
+          for f in "${RUNNER_TEMP}/out/"*.dmg; do (cd "$(dirname "$f")" && shasum -a 256 "$(basename "$f")" > "$(basename "$f").sha256"); done
+          ls -l "${RUNNER_TEMP}/out"
+      - name: Prove it connects, takes an update notice and updates
+        run: node tests/nlc-node/e2e/selfupdate-proof.cjs --artifacts "${RUNNER_TEMP}/out" --transcript "${RUNNER_TEMP}/selfupdate.txt"
+      - name: Prove raea travels in the payload and runs
+        if: matrix.arch == 'arm64'
+        run: node tests/nlc-node/e2e/raea-proof.cjs --artifacts "${RUNNER_TEMP}/out" --transcript "${RUNNER_TEMP}/raea.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NLC-Node-unified-macos-${{ matrix.arch }}
+          path: ${{ runner.temp }}/out/*
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: NLC-Node-unified-macos-${{ matrix.arch }}-transcripts
+          path: |
+            ${{ runner.temp }}/selfupdate.txt
+            ${{ runner.temp }}/raea.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+  windows:
+    name: "Windows x64"
+    runs-on: windows-2022
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+      - name: Install NSIS (the build script makes the setup program too)
+        shell: pwsh
+        run: |
+          choco install nsis --no-progress --yes
+          if (-not (Get-Command makensis.exe -ErrorAction SilentlyContinue)) { throw "NSIS did not provide makensis.exe." }
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm install --prefix ui --no-audit --no-fund --ignore-scripts
+      - name: Unit tests (tray window, raea step)
+        shell: pwsh
+        run: node --test tests/nlc-node/tray-app.test.cjs tests/nlc-node/raea-install.test.cjs
+      - name: Make a throwaway update key for this test build
+        shell: pwsh
+        run: |
+          node -e "const c=require('crypto');const k=c.generateKeyPairSync('ed25519');console.log('NLC_NODE_UPDATE_PUBLIC_KEY_B64='+k.publicKey.export({format:'der',type:'spki'}).toString('base64'))" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "NLC_NODE_WITHOUT_CENTRAL_TRANSPORT=1" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Fetch the pinned raea release (checked against its published checksum)
+        shell: pwsh
+        run: |
+          node scripts/nlc-node/fetch-raea.cjs win32-x64 "$env:RUNNER_TEMP\raea"
+          if ($LASTEXITCODE -ne 0) { throw 'raea fetch failed' }
+          "NLC_NODE_RAEA_DIR=$env:RUNNER_TEMP\raea" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Build the launcher, host and setup program, and pack the payload
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          $installationPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $installationPath) { throw "Visual C++ build tools are unavailable." }
+          $developerCommand = Join-Path $installationPath "Common7\Tools\VsDevCmd.bat"
+          cmd.exe /c "`"$developerCommand`" -arch=x64 && set" | ForEach-Object {
+            if ($_ -match "^(.*?)=(.*)$") { [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process") }
+          }
+          .\installer\nlc-node\windows\build.ps1 -OutputRoot "$env:GITHUB_WORKSPACE\dist\nlc-node\windows-x64"
+          if ($LASTEXITCODE -ne 0) { throw 'windows build failed' }
+          $env:PATH = "$env:SystemRoot\System32;$env:PATH"
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\out" | Out-Null
+          node scripts/nlc-node/build-payload.cjs windows-x64 --out "$env:RUNNER_TEMP\out"
+          if ($LASTEXITCODE -ne 0) { throw 'payload build failed' }
+          $setup = Get-ChildItem "$env:GITHUB_WORKSPACE\dist\nlc-node" -Recurse -Filter "NLC-Node-Setup-x64.exe" | Select-Object -First 1
+          if (-not $setup) { throw 'setup program not found' }
+          Copy-Item $setup.FullName "$env:RUNNER_TEMP\out\"
+          $h = (Get-FileHash "$env:RUNNER_TEMP\out\NLC-Node-Setup-x64.exe" -Algorithm SHA256).Hash.ToLower()
+          "$h  NLC-Node-Setup-x64.exe" | Out-File -Encoding ascii "$env:RUNNER_TEMP\out\NLC-Node-Setup-x64.exe.sha256"
+          Get-ChildItem "$env:RUNNER_TEMP\out" | Format-Table Name, Length
+      - name: Prove it connects, takes an update notice and updates, with no window on screen
+        shell: pwsh
+        run: node tests/nlc-node/e2e/selfupdate-proof.cjs --artifacts "$env:RUNNER_TEMP\out" --transcript "$env:RUNNER_TEMP\selfupdate.txt"
+      - name: Prove raea travels in the payload and runs
+        shell: pwsh
+        run: node tests/nlc-node/e2e/raea-proof.cjs --artifacts "$env:RUNNER_TEMP\out" --transcript "$env:RUNNER_TEMP\raea.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NLC-Node-unified-windows-x64
+          path: ${{ runner.temp }}/out/*
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: NLC-Node-unified-windows-transcripts
+          path: |
+            ${{ runner.temp }}/selfupdate.txt
+            ${{ runner.temp }}/raea.txt
+          if-no-files-found: warn
+          retention-days: 14
