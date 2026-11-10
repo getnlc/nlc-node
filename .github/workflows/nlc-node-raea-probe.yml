@@ -26,7 +26,6 @@ jobs:
           $r = (Resolve-Path x\raea).Path
           & "$r\bin\raea.exe" --version
           Get-CimInstance Win32_VideoController | Select Name,DriverVersion | Format-List
-          $env:RAEA_HOME = $r
           foreach ($be in @('', 'dx12', 'vulkan')) {
             "=== backend '$be'"
             if ($be) { $env:WGPU_BACKEND = $be } else { Remove-Item Env:WGPU_BACKEND -ErrorAction SilentlyContinue }
