@@ -63,7 +63,12 @@ fi
 
 cp -R "${APP_ROOT}" "${STAGING}/"
 ln -s /Applications "${STAGING}/Applications"
-hdiutil create -volname "NLC Node" -srcfolder "${STAGING}" -ov -format UDZO "${DMG_PATH}"
+# macOS sometimes answers "Resource busy" for a moment while it is still indexing the new app; trying again is the supported answer.
+for attempt in 1 2 3 4 5; do
+  hdiutil create -volname "NLC Node" -srcfolder "${STAGING}" -ov -format UDZO "${DMG_PATH}" && break
+  [[ ${attempt} -lt 5 ]] || { echo "NLC Node could not make the dmg after five tries." >&2; exit 1; }
+  sleep 10
+done
 
 if [[ "${SIGN}" == "--sign" ]]; then
   codesign --force --timestamp --sign "${NLC_NODE_MAC_APPLICATION_IDENTITY}" "${DMG_PATH}"
