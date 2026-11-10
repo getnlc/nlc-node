@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { installRaea } = require('../../lib/nlc-node/raea-install.cjs');
+const PLATFORM = process.platform === 'win32' ? 'win32' : 'darwin'; // real files are used, so the host's own path style
 const { planExtras } = require('../../scripts/nlc-node/build-payload.cjs');
 
 function fixture() {
@@ -29,12 +30,12 @@ test('raea: the bundled archive is unpacked into ~/.raea once and the command is
   const f = fixture();
   const paths = [];
   const addToPath = async ({ binDir }) => { paths.push(binDir); };
-  const first = await installRaea({ platform: 'win32', homeDir: f.homeDir, nodeDir: f.nodeDir, runImpl: f.runImpl, addToPath });
+  const first = await installRaea({ platform: PLATFORM, homeDir: f.homeDir, nodeDir: f.nodeDir, runImpl: f.runImpl, addToPath });
   assert.equal(first.status, 'installed');
   assert.ok(fs.existsSync(path.join(f.homeDir, '.raea', 'bin', 'raea')));
   assert.equal(JSON.parse(fs.readFileSync(path.join(f.homeDir, '.raea', 'nlc-installed.json'), 'utf8')).version, '9.9.9');
   assert.deepEqual(paths, [path.join(f.homeDir, '.raea', 'bin')]);
-  const second = await installRaea({ platform: 'win32', homeDir: f.homeDir, nodeDir: f.nodeDir, runImpl: f.runImpl, addToPath });
+  const second = await installRaea({ platform: PLATFORM, homeDir: f.homeDir, nodeDir: f.nodeDir, runImpl: f.runImpl, addToPath });
   assert.equal(second.status, 'current');
   assert.equal(paths.length, 1);
 });
@@ -42,7 +43,7 @@ test('raea: the bundled archive is unpacked into ~/.raea once and the command is
 test('raea: a payload without raea (Intel Mac) changes nothing', async () => {
   const f = fixture();
   fs.rmSync(path.join(f.nodeDir, 'raea'), { recursive: true });
-  const out = await installRaea({ platform: 'win32', homeDir: f.homeDir, nodeDir: f.nodeDir, runImpl: f.runImpl });
+  const out = await installRaea({ platform: PLATFORM, homeDir: f.homeDir, nodeDir: f.nodeDir, runImpl: f.runImpl });
   assert.equal(out.status, 'not-bundled');
   assert.equal(fs.existsSync(path.join(f.homeDir, '.raea')), false);
 });
@@ -51,12 +52,12 @@ test('raea: a broken archive leaves the person\'s existing ~/.raea alone', async
   const f = fixture();
   fs.mkdirSync(path.join(f.homeDir, '.raea', 'bin'), { recursive: true });
   fs.writeFileSync(path.join(f.homeDir, '.raea', 'bin', 'raea'), 'theirs');
-  await assert.rejects(installRaea({ platform: 'win32', homeDir: f.homeDir, nodeDir: f.nodeDir, runImpl: async () => { throw new Error('bad archive'); } }));
+  await assert.rejects(installRaea({ platform: PLATFORM, homeDir: f.homeDir, nodeDir: f.nodeDir, runImpl: async () => { throw new Error('bad archive'); } }));
   assert.equal(fs.readFileSync(path.join(f.homeDir, '.raea', 'bin', 'raea'), 'utf8'), 'theirs');
 });
 
 test('the payload builder carries the fetched raea archive and its raea.json', () => {
   const f = fixture();
-  const out = planExtras({ target: 'windows-x64', raeaDir: path.join(f.nodeDir, 'raea'), centralTransportDir: '', centralRuntimePath: '' });
+  const out = planExtras({ target: PLATFORM === 'win32' ? 'windows-x64' : 'macos-arm64', raeaDir: path.join(f.nodeDir, 'raea'), centralTransportDir: '', centralRuntimePath: '' });
   assert.deepEqual(out.filter((e) => e.rel.startsWith('raea/')).map((e) => e.rel).sort(), ['raea/raea-9.9.9-test.zip', 'raea/raea.json']);
 });
