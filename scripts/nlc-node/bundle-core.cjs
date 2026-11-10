@@ -31,6 +31,8 @@ function collectModules(entryPath, sourceRoot, modules = new Map()) {
     collectModules(dependency, sourceRoot, modules);
     return `__nlcRequire(${JSON.stringify(moduleId(dependency, sourceRoot))})`;
   });
+  // A json file the program reads (for example public-source.json) travels as a module that returns its value.
+  if (absolute.endsWith('.json')) source = `module.exports = ${JSON.stringify(JSON.parse(original))};`;
   modules.set(id, source);
   return modules;
 }
