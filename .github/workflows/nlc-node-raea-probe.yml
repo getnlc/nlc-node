@@ -31,7 +31,7 @@ jobs:
             "=== backend '$be'"
             if ($be) { $env:WGPU_BACKEND = $be } else { Remove-Item Env:WGPU_BACKEND -ErrorAction SilentlyContinue }
             $out = "out-$be.mp4"
-            & "$r\bin\raea.exe" render tests/nlc-node/fixtures/raea/hello.tsx -o $out --quality draft 2>&1 | Select -Last 25
+            & "$r\bin\raea.exe" render tests/nlc-node/fixtures/scene-sample/hello.tsx -o $out --quality draft 2>&1 | Select -Last 25
             "exit $LASTEXITCODE"
             if (Test-Path $out) { (Get-Item $out).Length }
           }
@@ -50,5 +50,5 @@ jobs:
           r=$(ls -d x/*/ | head -1); r=$(cd "$r" && pwd)
           "$r/bin/raea" --version
           system_profiler SPDisplaysDataType | head -20
-          "$r/bin/raea" render tests/nlc-node/fixtures/raea/hello.tsx -o out.mp4 --quality draft 2>&1 | tail -30
+          "$r/bin/raea" render tests/nlc-node/fixtures/scene-sample/hello.tsx -o out.mp4 --quality draft 2>&1 | tail -30
           echo "exit $?"; ls -l out.mp4
