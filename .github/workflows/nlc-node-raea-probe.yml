@@ -19,23 +19,26 @@ jobs:
       - shell: pwsh
         run: |
           $ErrorActionPreference='Continue'
-          $v='0.1.1-rc2'; $f="raea-$v-windows-x86_64.zip"; $u="https://github.com/shinyobjectz/raea/releases/download/$env:RAEA_TAG/$f"
-          Invoke-WebRequest $u -OutFile $f
-          (Get-FileHash $f -Algorithm SHA256).Hash.ToLower()
+          $v='0.1.1-rc2'; $f="raea-$v-windows-x86_64.zip"
+          Invoke-WebRequest "https://github.com/shinyobjectz/raea/releases/download/$env:RAEA_TAG/$f" -OutFile $f
           New-Item -ItemType Directory x | Out-Null; tar -xf $f -C x
           $r = (Resolve-Path x\raea).Path
-          & "$r\bin\raea.exe" --version
-          Get-CimInstance Win32_VideoController | Select Name,DriverVersion | Format-List
-          foreach ($be in @('', 'dx12', 'vulkan')) {
-            "=== backend '$be'"
-            if ($be) { $env:WGPU_BACKEND = $be } else { Remove-Item Env:WGPU_BACKEND -ErrorAction SilentlyContinue }
-            $out = "out-$be.mp4"
-            & "$r\bin\raea.exe" render tests/nlc-node/fixtures/scene-sample/hello.tsx -o $out --quality draft 2>&1 | Select -Last 25
-            "exit $LASTEXITCODE"
-            if (Test-Path $out) { (Get-Item $out).Length }
-          }
+          "loader before:"; Get-ChildItem C:\Windows\System32\vulkan-1.dll -ErrorAction SilentlyContinue
+          choco install vulkan-runtime -y --no-progress 2>&1 | Select -Last 5
+          "loader after:"; Get-ChildItem C:\Windows\System32\vulkan-1.dll -ErrorAction SilentlyContinue
+          Invoke-WebRequest https://github.com/pal1000/mesa-dist-win/releases/download/26.2.6/mesa3d-26.2.6-release-msvc.7z -OutFile mesa.7z
+          (Get-FileHash mesa.7z -Algorithm SHA256).Hash.ToLower()
+          7z x mesa.7z -omesa -y | Select -Last 3
+          Get-ChildItem mesa -Recurse | Where-Object { $_.Name -match 'lvp|vulkan' } | Select -ExpandProperty FullName
+          $icd = (Get-ChildItem mesa -Recurse -Filter 'lvp_icd*.json' | Select -First 1).FullName
+          $icd; Get-Content $icd
+          $env:VK_DRIVER_FILES = $icd; $env:VK_ICD_FILENAMES = $icd
+          $env:WGPU_BACKEND = 'vulkan'
+          & "$r\bin\raea.exe" render tests/nlc-node/fixtures/scene-sample/hello.tsx -o out.mp4 --quality draft 2>&1 | Select -Last 30
+          "exit $LASTEXITCODE"
+          if (Test-Path out.mp4) { (Get-Item out.mp4).Length }
   mac:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
