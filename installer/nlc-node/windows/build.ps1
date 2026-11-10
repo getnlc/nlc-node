@@ -42,7 +42,8 @@ $InstallerName = (& node (Join-Path $RepoRoot "lib/nlc-node/artifact-names.cjs")
 $InstallerPath = Join-Path $OutputRoot $InstallerName
 $Version = (Get-Content -Raw (Join-Path $PSScriptRoot "../release.json") | ConvertFrom-Json).version
 $nsisArgs = @("/DOUTFILE=$InstallerPath", "/DLAUNCHER=$LauncherPath", "/DHOST=$HostPath", "/DVERSION=$Version")
-if ($ToolsDir) { $nsisArgs += "/DTOOLS_DIR=$((Resolve-Path $ToolsDir).Path)" }
+# Pack the folder only when something was staged: the setup program refuses an empty one.
+if ($ToolsDir -and (Test-Path $ToolsDir) -and (Get-ChildItem -Path $ToolsDir -Recurse -File -Force | Select-Object -First 1)) { $nsisArgs += "/DTOOLS_DIR=$((Resolve-Path $ToolsDir).Path)" }
 & makensis.exe @nsisArgs (Join-Path $PSScriptRoot "nlc-node.nsi")
 if ($LASTEXITCODE -ne 0) { throw "NLC Node installer build failed." }
 
