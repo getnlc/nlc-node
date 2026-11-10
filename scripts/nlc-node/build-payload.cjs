@@ -169,7 +169,7 @@ if (require.main === module) {
       launcherPath: path.join(dist, 'NLC Node.exe'),
       hostPath: path.join(dist, 'host', 'NLC Node Host.exe'),
       ffmpegDir: opt('--ffmpeg-dir', ''),
-      whisperDir: opt('--whisper-dir', ''), centralTransportDir: opt('--central-transport-dir', path.join(root, 'packages', 'nlc-central-transport')), centralRuntimePath: opt('--central-runtime', process.execPath),
+      whisperDir: opt('--whisper-dir', ''), centralTransportDir: opt('--central-transport-dir', process.env.NLC_NODE_WITHOUT_CENTRAL_TRANSPORT === '1' ? '' : path.join(root, 'packages', 'nlc-central-transport')), centralRuntimePath: opt('--central-runtime', process.execPath),
     });
     process.stdout.write(`${result.file}\n`);
   } catch (error) { process.stderr.write(`${error.message}\n`); process.exitCode = 1; }
