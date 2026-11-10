@@ -1,0 +1,6 @@
+{
+  "name": "nlc-node-proof-server",
+  "private": true,
+  "description": "The NLC server-side routes NLC Node talks to (pairing, download, update notice, websocket), used only by the CI self-update proof.",
+  "dependencies": { "express": "4.21.2", "ws": "8.18.0" }
+}

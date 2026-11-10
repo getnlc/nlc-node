@@ -1,8 +1,9 @@
 name: NLC Node current payload proof (unsigned)
 
-# Builds the Mac payload from this source (folder fixes, ask_for_folder, self-update) on a standard free GitHub-hosted runner,
-# installs it the way a customer does against the NLC server-side routes, shows it connecting, publishes a newer build and shows
-# the connected Node taking the update notice, updating itself and coming back connected. Throwaway update key; no secrets.
+# Builds the payload from this source (folder fixes, ask_for_folder, self-update) on standard free GitHub-hosted runners,
+# installs it the way a customer does against the NLC server-side routes (the files under ui/ and lib/nlc-pass.cjs), shows it
+# connecting, publishes a newer build and shows the connected Node taking the update notice, updating itself and coming back
+# connected. Throwaway update key; the Central transport is not part of this build; no secrets.
 on:
   workflow_dispatch:
   push:
@@ -22,16 +23,11 @@ jobs:
         with:
           node-version: 22.22.3
       - name: Install build dependencies
-        run: npm ci --ignore-scripts --no-audit --no-fund
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm install --prefix ui --no-audit --no-fund --ignore-scripts
       - name: Unit tests for the folder fixes
         run: node --test tests/nlc-node/grants-follow.test.cjs tests/nlc-node/grants.test.cjs tests/nlc-node/path-guard.test.cjs tests/nlc-node/dispatcher.test.cjs
-      - name: Fetch the NLC server-side routes the Node talks to (published, checked against a pinned checksum)
-        run: |
-          set -euo pipefail
-          curl -fsSL -o "${RUNNER_TEMP}/server-side.tgz" "https://felix-tay.nexlevelclaw.tech/downloads/nlc-node/proof/server-side-03ef2368dc01.tgz"
-          echo "03ef2368dc01537ef6adcda094026613b74697ed58d62f22bedfc8cf49c43220  ${RUNNER_TEMP}/server-side.tgz" | shasum -a 256 -c -
-          tar -xzf "${RUNNER_TEMP}/server-side.tgz"
-          npm install --prefix ui --no-audit --no-fund --ignore-scripts
       - name: Make a throwaway update key for this test build
         run: |
           node -e "const c=require('crypto');const k=c.generateKeyPairSync('ed25519');console.log('NLC_NODE_UPDATE_PUBLIC_KEY_B64='+k.publicKey.export({format:'der',type:'spki'}).toString('base64'))" >> "${GITHUB_ENV}"
@@ -50,5 +46,61 @@ jobs:
         with:
           name: NLC-Node-current-proof-macos-transcript
           path: ${{ runner.temp }}/selfupdate-macos.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+  windows:
+    name: "Windows payload connects, takes an update notice, updates"
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+      - name: Install NSIS (the build script makes the setup program too)
+        shell: pwsh
+        run: |
+          choco install nsis --no-progress --yes
+          if (-not (Get-Command makensis.exe -ErrorAction SilentlyContinue)) { throw "NSIS did not provide makensis.exe." }
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm install --prefix ui --no-audit --no-fund --ignore-scripts
+      - name: Unit tests for the folder fixes
+        shell: pwsh
+        run: |
+          node --test tests/nlc-node/grants-follow.test.cjs tests/nlc-node/grants.test.cjs tests/nlc-node/path-guard.test.cjs tests/nlc-node/dispatcher.test.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'folder fix tests failed' }
+      - name: Make a throwaway update key for this test build
+        shell: pwsh
+        run: |
+          node -e "const c=require('crypto');const k=c.generateKeyPairSync('ed25519');console.log('NLC_NODE_UPDATE_PUBLIC_KEY_B64='+k.publicKey.export({format:'der',type:'spki'}).toString('base64'))" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "NLC_NODE_WITHOUT_CENTRAL_TRANSPORT=1" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Build the launcher and host, and pack the payload
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          $installationPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $installationPath) { throw "Visual C++ build tools are unavailable." }
+          $developerCommand = Join-Path $installationPath "Common7\Tools\VsDevCmd.bat"
+          cmd.exe /c "`"$developerCommand`" -arch=x64 && set" | ForEach-Object {
+            if ($_ -match "^(.*?)=(.*)$") { [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process") }
+          }
+          .\installer\nlc-node\windows\build.ps1 -OutputRoot "$env:GITHUB_WORKSPACE\dist\nlc-node\windows-x64"
+          $env:PATH = "$env:SystemRoot\System32;$env:PATH"
+          node scripts/nlc-node/build-payload.cjs windows-x64 --out "$env:RUNNER_TEMP\payload"
+          if ($LASTEXITCODE -ne 0) { throw 'payload build failed' }
+          Get-ChildItem "$env:RUNNER_TEMP\payload" | Format-Table Name, Length
+      - name: Prove it connects and a connected Node takes an update notice and updates, with no window on screen
+        shell: pwsh
+        run: node tests/nlc-node/e2e/selfupdate-proof.cjs --artifacts "$env:RUNNER_TEMP\payload" --transcript "$env:RUNNER_TEMP\selfupdate-windows.txt"
+      - name: Upload the transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NLC-Node-current-proof-windows-transcript
+          path: ${{ runner.temp }}/selfupdate-windows.txt
           if-no-files-found: warn
           retention-days: 14
