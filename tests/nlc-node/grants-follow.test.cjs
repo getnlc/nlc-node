@@ -10,7 +10,7 @@ const { createPathGuard } = require('../../lib/nlc-node/path-guard.cjs');
 const { createDispatcher } = require('../../lib/nlc-node/dispatcher.cjs');
 
 function setup() {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hf19-')));
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'hf19-')));
   const home = path.join(root, 'home', 'nika');
   for (const d of ['Desktop', 'Documents']) fs.mkdirSync(path.join(home, d), { recursive: true });
   const stateDir = path.join(root, 'state');
