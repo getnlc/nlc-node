@@ -1,0 +1,54 @@
+name: NLC Node current payload proof (unsigned)
+
+# Builds the Mac payload from this source (folder fixes, ask_for_folder, self-update) on a standard free GitHub-hosted runner,
+# installs it the way a customer does against the NLC server-side routes, shows it connecting, publishes a newer build and shows
+# the connected Node taking the update notice, updating itself and coming back connected. Throwaway update key; no secrets.
+on:
+  workflow_dispatch:
+  push:
+    branches: [current-payload]
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: Mac payload: connects, takes an update notice, updates
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+      - name: Install build dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Unit tests for the folder fixes
+        run: node --test tests/nlc-node/grants-follow.test.cjs tests/nlc-node/grants.test.cjs tests/nlc-node/path-guard.test.cjs tests/nlc-node/dispatcher.test.cjs
+      - name: Fetch the NLC server-side routes the Node talks to (published, checked against a pinned checksum)
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "${RUNNER_TEMP}/server-side.tgz" "https://felix-tay.nexlevelclaw.tech/downloads/nlc-node/proof/server-side-4f4ced122c67.tgz"
+          echo "4f4ced122c67e2aa378231cb21c613115de20270c8b63448c9120943e58fb77c  ${RUNNER_TEMP}/server-side.tgz" | shasum -a 256 -c -
+          tar -xzf "${RUNNER_TEMP}/server-side.tgz"
+          npm install --prefix ui --no-audit --no-fund --ignore-scripts
+      - name: Make a throwaway update key for this test build
+        run: |
+          node -e "const c=require('crypto');const k=c.generateKeyPairSync('ed25519');console.log('NLC_NODE_UPDATE_PUBLIC_KEY_B64='+k.publicKey.export({format:'der',type:'spki'}).toString('base64'))" >> "${GITHUB_ENV}"
+          echo "NLC_NODE_WITHOUT_CENTRAL_TRANSPORT=1" >> "${GITHUB_ENV}"
+      - name: Build the app and pack the payload
+        run: |
+          set -euo pipefail
+          bash ./installer/nlc-node/macos/build.sh macos-arm64
+          node scripts/nlc-node/build-payload.cjs macos-arm64 --out "${RUNNER_TEMP}/payload"
+          ls -l "${RUNNER_TEMP}/payload"
+      - name: Prove it connects and a connected Node takes an update notice and updates
+        run: node tests/nlc-node/e2e/selfupdate-proof.cjs --artifacts "${RUNNER_TEMP}/payload" --transcript "${RUNNER_TEMP}/selfupdate-macos.txt"
+      - name: Upload the transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NLC-Node-current-proof-macos-transcript
+          path: ${{ runner.temp }}/selfupdate-macos.txt
+          if-no-files-found: warn
+          retention-days: 14

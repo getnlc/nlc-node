@@ -111,13 +111,13 @@ test('an unknown folder name returns NOT_GRANTED listing the shared folders, or 
   const guard = createPathGuard({ grants: grantsOf([{ label: 'Footage', path: grant }, { label: 'Footage 2', path: grant }]) });
   await assert.rejects(guard.resolve('Music', 'x'), (error) => {
     assert.equal(error.code, 'NOT_GRANTED');
-    assert.equal(error.message, 'That folder has not been shared with me. Available folders: Footage, Footage 2.');
+    assert.equal(error.message, 'That folder has not been shared with me. Available folders: Footage, Footage 2. If the customer means a different folder, call ask_for_folder: a folder chooser opens on their computer and they pick it.');
     return true;
   });
   const none = createPathGuard({ grants: grantsOf([]) });
   await assert.rejects(none.resolve('Footage', 'x'), (error) => {
     assert.equal(error.code, 'NOT_GRANTED');
-    assert.match(error.message, /No folders are shared with me yet.*Add folder/);
+    assert.match(error.message, /No folders are shared with me yet.*ask_for_folder/);
     return true;
   });
 });

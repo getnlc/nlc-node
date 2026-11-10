@@ -48,7 +48,7 @@ test('adding a folder stores label, real path and time, keeps it across restarts
   const reopened = createGrants({ stateDir, homeDir: home });
   assert.deepEqual(reopened.list(), grants.list());
   const onDisk = JSON.parse(fs.readFileSync(path.join(stateDir, 'grants.json'), 'utf8'));
-  assert.deepEqual(onDisk.grants.map((g) => Object.keys(g).sort()), [['addedAt', 'label', 'path']]);
+  assert.deepEqual(onDisk.grants.map((g) => Object.keys(g).sort()), [['addedAt', 'id', 'label', 'path']]);
 });
 
 test('labels are unique even when folder names repeat or differ only by case', async (t) => {

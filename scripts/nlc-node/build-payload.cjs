@@ -160,7 +160,7 @@ if (require.main === module) {
   const dist = path.join(root, 'dist', 'nlc-node', target || '');
   try {
     if (opt('--stage-tools', '')) {
-      process.stdout.write(`${stageTools({ target, outDir: path.resolve(opt('--stage-tools', '')), resourcesDir: opt('--stage-resources', '') ? path.resolve(opt('--stage-resources', '')) : '', ffmpegDir: opt('--ffmpeg-dir', ''), whisperDir: opt('--whisper-dir', ''), centralTransportDir: opt('--central-transport-dir', path.join(root, 'packages', 'nlc-central-transport')), centralRuntimePath: opt('--central-runtime', process.execPath) })}\n`);
+      process.stdout.write(`${stageTools({ target, outDir: path.resolve(opt('--stage-tools', '')), resourcesDir: opt('--stage-resources', '') ? path.resolve(opt('--stage-resources', '')) : '', ffmpegDir: opt('--ffmpeg-dir', ''), whisperDir: opt('--whisper-dir', ''), centralTransportDir: opt('--central-transport-dir', process.env.NLC_NODE_WITHOUT_CENTRAL_TRANSPORT === '1' ? '' : path.join(root, 'packages', 'nlc-central-transport')), centralRuntimePath: opt('--central-runtime', process.execPath) })}\n`);
       return;
     }
     const result = buildPayload({
