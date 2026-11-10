@@ -1,0 +1,54 @@
+name: NLC Node raea probe
+on:
+  push:
+    branches: [raea-proof]
+    paths: [.github/workflows/nlc-node-raea-probe.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  RAEA_TAG: v0.1.1-rc2
+  RAEA_OFFLINE: "1"
+  RAEA_FEED_MCP_PORT: "0"
+jobs:
+  win:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        run: |
+          $ErrorActionPreference='Continue'
+          $v='0.1.1-rc2'; $f="raea-$v-windows-x86_64.zip"; $u="https://github.com/shinyobjectz/raea/releases/download/$env:RAEA_TAG/$f"
+          Invoke-WebRequest $u -OutFile $f
+          (Get-FileHash $f -Algorithm SHA256).Hash.ToLower()
+          New-Item -ItemType Directory x | Out-Null; tar -xf $f -C x
+          $r = (Resolve-Path x\raea).Path
+          & "$r\bin\raea.exe" --version
+          Get-CimInstance Win32_VideoController | Select Name,DriverVersion | Format-List
+          $env:RAEA_HOME = $r
+          foreach ($be in @('', 'dx12', 'vulkan')) {
+            "=== backend '$be'"
+            if ($be) { $env:WGPU_BACKEND = $be } else { Remove-Item Env:WGPU_BACKEND -ErrorAction SilentlyContinue }
+            $out = "out-$be.mp4"
+            & "$r\bin\raea.exe" render tests/nlc-node/fixtures/raea/hello.tsx -o $out --quality draft 2>&1 | Select -Last 25
+            "exit $LASTEXITCODE"
+            if (Test-Path $out) { (Get-Item $out).Length }
+          }
+  mac:
+    runs-on: macos-14
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - shell: bash
+        run: |
+          set +e
+          v=0.1.1-rc2; f="raea-$v-macos-arm64.tar.gz"
+          curl -fsSL -o "$f" "https://github.com/shinyobjectz/raea/releases/download/$RAEA_TAG/$f"
+          shasum -a 256 "$f"
+          mkdir x && tar -xzf "$f" -C x && ls x x/*
+          r=$(ls -d x/*/ | head -1); r=$(cd "$r" && pwd)
+          "$r/bin/raea" --version
+          system_profiler SPDisplaysDataType | head -20
+          "$r/bin/raea" render tests/nlc-node/fixtures/raea/hello.tsx -o out.mp4 --quality draft 2>&1 | tail -30
+          echo "exit $?"; ls -l out.mp4
