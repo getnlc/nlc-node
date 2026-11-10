@@ -7,11 +7,16 @@ name: NLC Node unified build (unsigned)
 # Throwaway update key; the private Central transport is not part of this public build; no secrets.
 on:
   workflow_dispatch:
+    inputs:
+      publish_tag:
+        description: "Publish the built files as a GitHub release with this tag (empty = do not publish)"
+        type: string
+        default: ""
   push:
     branches: [unified]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   macos:
@@ -150,3 +155,25 @@ jobs:
             ${{ runner.temp }}/raea.txt
           if-no-files-found: warn
           retention-days: 14
+
+  release:
+    name: "Publish the files as a release"
+    needs: [macos, windows]
+    if: inputs.publish_tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: NLC-Node-unified-*
+          path: files
+          merge-multiple: true
+      - name: Check every file against its .sha256, then create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd files
+          rm -f selfupdate.txt raea.txt
+          for s in *.sha256; do f="${s%.sha256}"; want=$(awk '{print $1}' "$s"); got=$(sha256sum "$f" | awk '{print $1}'); [ "$want" = "$got" ] || { echo "BAD $f"; exit 1; }; echo "OK $f"; done
+          ls -l
+          gh release create "${{ inputs.publish_tag }}" --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "NLC Node ${{ inputs.publish_tag }}" --notes "Unsigned NLC Node build: tray window, folder fixes, self-update, raea. Commit ${{ github.sha }}." *
