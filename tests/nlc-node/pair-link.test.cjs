@@ -124,7 +124,7 @@ test('Y2/Y4 journey: a Node with no address pairs from the connection link, reme
   assert.equal((await vps.dashboard('DELETE', `/api/node/machines/${machine.machineId}`)).status, 200);
   const win2 = await windowOf(app2);
   const html = await until(async () => { const v = await win2.view(); return /Disconnected/.test(v) ? v : ''; }, 'window shows Disconnected');
-  assert.match(visible(html), /This computer was disconnected from your assistant\. Enter a new code to connect again\./);
+  assert.match(visible(html), /This computer was disconnected from your agents\. Enter a new code to connect again\./);
   assert.doesNotMatch(visible(html), /Not connected yet/);
   assert.match(html, /class="card pair"/);
 

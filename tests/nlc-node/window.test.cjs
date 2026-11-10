@@ -139,7 +139,7 @@ test('G01: Add folder shares the chosen folder, it appears in the list, with the
     t.f.picks.push({ status: 'added', grant: { label: 'Footage' } });
     t.f.grantList.push({ label: 'Footage', path: '/Users/amy/Footage', addedAt: 't' });
     const out = await t.post('/v1/window/folders/add', {});
-    assert.equal(out.message, 'Footage is shared. Your assistant can open, change and move files in it. Deleted files go to NLC Trash.');
+    assert.equal(out.message, 'Footage is shared. Your agents can open, change and move files in it. Deleted files go to NLC Trash.');
     const html = await t.view();
     assert.match(html, /folder-name">Footage</);
     assert.match(html, /\/Users\/amy\/Footage/);
@@ -332,7 +332,7 @@ test('Y4: after the dashboard disconnected this computer the window says Disconn
     const html = await t.view();
     const text = visible(html);
     assert.match(text, /Disconnected/);
-    assert.match(text, /This computer was disconnected from your assistant\. Enter a new code to connect again\./);
+    assert.match(text, /This computer was disconnected from your agents\. Enter a new code to connect again\./);
     assert.doesNotMatch(text, /Not connected yet/);
     assert.equal(count(html, /class="card pair"/g), 1, 'the pairing box is there');
     assert.match(html, /class="dot offline"/);

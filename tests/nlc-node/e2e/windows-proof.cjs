@@ -151,7 +151,7 @@ async function main() {
       return { error: !!r.isError, text, json };
     };
     const status = await call('computer_status');
-    check('C01b', 'agent computer_status lists the computer and its shared folder', !status.error && status.json.machines[0].connected === true && status.json.machines[0].folders.map((f) => f.label).join() === 'Footage');
+    check('C01b', 'agent computer_status lists the computer, its shared folder and Your NLC folder', !status.error && status.json.machines[0].connected === true && status.json.machines[0].folders.map((f) => f.label).sort().join() === 'Footage,NLC');
     const jobDone = async (started, label, ms = 60000) => {
       const id = started.json && (started.json.jobId || started.json.job_id);
       if (!id) throw new Error(`${label}: no job id: ${started.text}`);

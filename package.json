@@ -1,0 +1,8 @@
+{
+  "name": "nlc-node-source",
+  "private": true,
+  "description": "Build tools for NLC Node, used by the workflows in .github/workflows",
+  "devDependencies": {
+    "postject": "1.0.0-alpha.6"
+  }
+}

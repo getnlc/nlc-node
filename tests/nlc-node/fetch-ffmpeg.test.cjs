@@ -68,16 +68,16 @@ const BASE = 'https://example.invalid/nlc-ffmpeg/ffmpeg-8.1.3-1';
 
 test('Windows entry is the pinned BtbN LGPL zip with the SHA-256 read from the release checksums file', () => {
   const s = buildSources({});
-  assert.strictEqual(s['win32-x64'].sha256, 'fcf161b43e3de302663b2a4be5bfa7105b607d310a97709b323f3d8eddec453a');
-  assert.match(s['win32-x64'].url, /autobuild-2026-10-23-13-04\/ffmpeg-n8\.1\.3-24-g92611900bb-win64-lgpl-8\.1\.zip$/);
+  assert.strictEqual(s['win32-x64'].sha256, '7bdec3860d33145a7cd68146eb8e1414e8881cac76205401211fbdad38ef0ed3');
+  assert.match(s['win32-x64'].url, /autobuild-2026-11-09-12-42\/ffmpeg-n8\.1\.3-34-ga35157abb9-win64-lgpl-8\.1\.zip$/);
 });
 
 test('NLC_FFMPEG_RELEASE_BASE points every target at our own storage and keeps the pinned hash', () => {
   const s = buildSources({ NLC_FFMPEG_RELEASE_BASE: BASE });
   assert.strictEqual(s['darwin-arm64'].url, BASE + '/ffmpeg-8.1.3-darwin-arm64-lgpl.tar.gz');
   assert.strictEqual(s['darwin-x64'].url, BASE + '/ffmpeg-8.1.3-darwin-x64-lgpl.tar.gz');
-  assert.strictEqual(s['win32-x64'].url, BASE + '/ffmpeg-n8.1.3-24-g92611900bb-win64-lgpl-8.1.zip');
-  assert.strictEqual(s['win32-x64'].sha256, 'fcf161b43e3de302663b2a4be5bfa7105b607d310a97709b323f3d8eddec453a');
+  assert.strictEqual(s['win32-x64'].url, BASE + '/ffmpeg-n8.1.3-34-ga35157abb9-win64-lgpl-8.1.zip');
+  assert.strictEqual(s['win32-x64'].sha256, '7bdec3860d33145a7cd68146eb8e1414e8881cac76205401211fbdad38ef0ed3');
   for (const t of ['darwin-arm64', 'darwin-x64']) assert.match(s[t].licence, /^LGPL/);
 });
 

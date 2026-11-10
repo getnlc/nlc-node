@@ -142,7 +142,7 @@ async function main() {
     const toolNames = tools.tools.map((t) => t.name);
     check('T01', 'the agent sees the file tools list, read_text, write_text, edit, rename, move, copy, search, delete, trash_list, trash_restore, log_recent', ['list', 'read_text', 'write_text', 'edit', 'rename', 'move', 'copy', 'search', 'delete', 'trash_list', 'trash_restore', 'log_recent'].every((n) => toolNames.includes(n)), toolNames.join(','));
     const status = await call('computer_status');
-    check('C01b', 'agent computer_status lists the computer and its shared folder', !status.error && status.json.machines[0].connected === true && status.json.machines[0].folders.map((f) => f.label).join() === 'Footage');
+    check('C01b', 'agent computer_status lists the computer, its shared folder and Your NLC folder', !status.error && status.json.machines[0].connected === true && status.json.machines[0].folders.map((f) => f.label).sort().join() === 'Footage,NLC');
 
     // ---- F01 list ----
     const expected = new Map();

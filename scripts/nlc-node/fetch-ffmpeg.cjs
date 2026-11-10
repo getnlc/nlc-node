@@ -17,10 +17,10 @@ const { execFile } = require('node:child_process');
 // NLC_FFMPEG_DARWIN_ARM64_SHA256 / NLC_FFMPEG_DARWIN_X64_SHA256 supply the hashes printed by the workflow until they are committed below.
 const FFMPEG_VERSION = '8.1.3';
 const BLOCKED_HOSTS = ['ffmpeg.martin-riedl.de', 'evermeet.cx', 'osxexperts.net']; // GPL builds with libx264/libx265
-const WIN_FILE = 'ffmpeg-n8.1.3-24-g92611900bb-win64-lgpl-8.1.zip';
-const WIN_BTBN_URL = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-23-13-04/' + WIN_FILE;
-// From the release's checksums.sha256 (read 24 Oct 2026, 4:40 PM SGT). The zip was not downloaded or run here.
-const WIN_SHA256 = 'fcf161b43e3de302663b2a4be5bfa7105b607d310a97709b323f3d8eddec453a';
+const WIN_FILE = 'ffmpeg-n8.1.3-34-ga35157abb9-win64-lgpl-8.1.zip';
+const WIN_BTBN_URL = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-09-12-42/' + WIN_FILE;
+// Digest GitHub reports for this release asset (read 10 Nov 2026, 9:20 PM SGT). BtbN removes dated builds after about two weeks, so keep this pin fresh or serve the zip from our own release folder (NLC_FFMPEG_RELEASE_BASE).
+const WIN_SHA256 = '7bdec3860d33145a7cd68146eb8e1414e8881cac76205401211fbdad38ef0ed3';
 
 function buildSources(env = process.env) {
   const base = (env.NLC_FFMPEG_RELEASE_BASE || '').replace(/\/+$/, '');
