@@ -51,12 +51,13 @@ if [[ "${SIGN}" == "--sign" ]]; then
   : "${NLC_NODE_MAC_NOTARY_PROFILE:?NLC Node notarization requires NLC_NODE_MAC_NOTARY_PROFILE}"
   codesign --force --options runtime --timestamp --entitlements "${SCRIPT_DIR}/entitlements.plist" --sign "${NLC_NODE_MAC_APPLICATION_IDENTITY}" "${MACOS_DIR}/NLC Node Host"
   codesign --force --options runtime --timestamp --sign "${NLC_NODE_MAC_APPLICATION_IDENTITY}" "${MACOS_DIR}/NLC Node"
-  codesign --force --options runtime --timestamp --sign "${NLC_NODE_MAC_APPLICATION_IDENTITY}" "${MACOS_DIR}/central-runtime/node"
+  # A test build made without the private Central package (NLC_NODE_WITHOUT_CENTRAL_TRANSPORT=1) has no central-runtime to sign.
+  [[ ! -e "${MACOS_DIR}/central-runtime/node" ]] || codesign --force --options runtime --timestamp --sign "${NLC_NODE_MAC_APPLICATION_IDENTITY}" "${MACOS_DIR}/central-runtime/node"
   codesign --force --options runtime --timestamp --sign "${NLC_NODE_MAC_APPLICATION_IDENTITY}" "${APP_ROOT}"
 else
   codesign --force --sign - --entitlements "${SCRIPT_DIR}/entitlements.plist" "${MACOS_DIR}/NLC Node Host"
   codesign --force --sign - "${MACOS_DIR}/NLC Node"
-  codesign --force --sign - "${MACOS_DIR}/central-runtime/node"
+  [[ ! -e "${MACOS_DIR}/central-runtime/node" ]] || codesign --force --sign - "${MACOS_DIR}/central-runtime/node"
   codesign --force --sign - "${APP_ROOT}"
 fi
 
