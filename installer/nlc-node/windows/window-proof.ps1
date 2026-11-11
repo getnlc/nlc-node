@@ -129,3 +129,5 @@ try {
   Stop-Everything
   Set-Theme "light"
 }
+# A clean finish: the last native command above (host --stop with nothing running) must not decide this script's exit code.
+exit 0
