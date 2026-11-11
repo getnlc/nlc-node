@@ -24,6 +24,7 @@ export const NODE_AGENT_TOOLS = Object.freeze([
 const VIDEO_TOOLS = new Set(['media_info', 'video_trim', 'video_join', 'video_captions', 'video_proxy', 'video_frames', 'audio_mux', 'video_smooth', 'video_check']);
 export const DEFAULT_TIMEOUT_MS = 30_000;
 export const VIDEO_TIMEOUT_MS = 10 * 60_000;
+export const PREVIOUS_TOKEN_GRACE_MS = 10 * 60 * 1000;
 export const TOKEN_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 export const CODE_LIFETIME_MS = 10 * 60 * 1000;
 export const REQUEST_LIFETIME_MS = 10 * 60 * 1000;
@@ -187,14 +188,19 @@ export function createNodeBackend({
   function authenticate(machineId, token) {
     const rec = machines.get(String(machineId || ''));
     if (!rec || !token || rec.expiresAt <= now()) return null;
-    return sameHash(rec.tokenHash, sha256(token)) ? rec : null;
+    return tokenMatches(rec, sha256(token)) ? rec : null;
+  }
+
+  function tokenMatches(rec, hash) {
+    if (sameHash(rec.tokenHash, hash)) return true;
+    return !!(rec.prevTokenHash && rec.prevUntil > now() && sameHash(rec.prevTokenHash, hash));
   }
 
   function authenticateToken(token) {
     if (!token) return null;
     const hash = sha256(token);
     for (const rec of machines.values()) {
-      if (rec.expiresAt > now() && sameHash(rec.tokenHash, hash)) return rec;
+      if (rec.expiresAt > now() && tokenMatches(rec, hash)) return rec;
     }
     return null;
   }
@@ -203,6 +209,8 @@ export function createNodeBackend({
     const rec = authenticateToken(oldToken);
     if (!rec) return null;
     const token = issueToken();
+    // The previous token stays good for a short grace, so a sign-in already on its way with it is not refused.
+    rec.prevTokenHash = rec.tokenHash; rec.prevUntil = now() + PREVIOUS_TOKEN_GRACE_MS;
     rec.tokenHash = sha256(token);
     rec.expiresAt = now() + TOKEN_LIFETIME_MS;
     persist();
