@@ -34,10 +34,19 @@ test('Mac: the menu-bar app shows the window itself (a web view in a popover), n
   assert.match(read('installer/nlc-node/macos/Info.plist'), /NSAllowsLocalNetworking/);
 });
 
-test('Windows: the tray icon opens the window as an app window, never a browser tab', () => {
+test('Windows: the tray icon opens the app\'s own native window (a web view), never Edge or a browser', () => {
   const cpp = read('installer/nlc-node/windows/launcher.cpp');
   assert.match(cpp, /Shell_NotifyIconW/);
-  assert.match(cpp, /--app=/);
+  assert.match(cpp, /CreateCoreWebView2EnvironmentWithOptions/);
+  assert.match(cpp, /NLCNodeWindow/);
+  assert.doesNotMatch(cpp, /msedge/i);
+  assert.doesNotMatch(cpp, /--app=/);
+  assert.doesNotMatch(cpp, /ShellExecuteW\(nullptr, L"open", url\.c_str\(\)/);
+  const build = read('installer/nlc-node/windows/build.ps1');
+  assert.match(build, /WebView2LoaderStatic\.lib/);
+  assert.match(build, /fetch-webview2\.ps1/);
+  assert.match(read('installer/nlc-node/windows/fetch-webview2.ps1'), /Sha256 = "[0-9a-f]{64}"/);
+  assert.doesNotMatch(read('installer/nlc-node/windows/window-proof.ps1'), /msedge\.exe'/);
 });
 
 test('grants.replace: points a shared folder at a different folder, keeps its name, deletes nothing', async () => {

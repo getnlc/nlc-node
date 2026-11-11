@@ -15,7 +15,10 @@ $HostOutput = Join-Path $OutputRoot "host"
 if ($LASTEXITCODE -ne 0) { throw "NLC Node SEA host build failed." }
 
 $LauncherPath = Join-Path $OutputRoot "NLC Node.exe"
-& cl.exe /nologo /EHsc (Join-Path $PSScriptRoot "launcher.cpp") /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib shell32.lib "/OUT:$LauncherPath"
+# The tray app shows its window with WebView2 (static loader, so no extra file ships next to the launcher).
+$WebView2Dir = Join-Path $OutputRoot "webview2-sdk"
+& (Join-Path $PSScriptRoot "fetch-webview2.ps1") -OutDir $WebView2Dir
+& cl.exe /nologo /EHsc /std:c++17 "/I$(Join-Path $WebView2Dir 'include')" (Join-Path $PSScriptRoot "launcher.cpp") /link /SUBSYSTEM:WINDOWS "/LIBPATH:$(Join-Path $WebView2Dir 'lib')" WebView2LoaderStatic.lib user32.lib gdi32.lib shell32.lib ole32.lib advapi32.lib shlwapi.lib version.lib dwmapi.lib "/OUT:$LauncherPath"
 if ($LASTEXITCODE -ne 0) { throw "NLC Node launcher build failed." }
 
 $HostPath = Join-Path $HostOutput "NLC Node Host.exe"

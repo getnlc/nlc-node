@@ -5,7 +5,7 @@ name: NLC Node window proof (unsigned)
 on:
   workflow_dispatch:
   push:
-    branches: [pc03-proof]
+    branches: [pc03-proof, win-native-window]
 
 permissions:
   contents: read
