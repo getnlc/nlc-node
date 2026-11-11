@@ -337,7 +337,8 @@ static void startWebView() {
                 settings->put_AreDevToolsEnabled(FALSE);
                 settings->put_IsStatusBarEnabled(FALSE);
                 settings->put_IsZoomControlEnabled(FALSE);
-                settings->put_AreBrowserAcceleratorKeysEnabled(FALSE);
+                ComPtr<ICoreWebView2Settings3> settings3;
+                if (SUCCEEDED(settings.As(&settings3)) && settings3) settings3->put_AreBrowserAcceleratorKeysEnabled(FALSE);
               }
               applyNodeWindowTheme();
               fitWebViewToWindow();
