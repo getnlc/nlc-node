@@ -1,5 +1,6 @@
 'use strict';
-// A payload that goes out as the current NLC Node must carry its video and captioning tools and their notices.
+// A payload that goes out as the current NLC Node must carry its video and captioning tools, raea, and their notices.
+// raea has a published build for Windows x64 and Apple-chip Macs only (installer/nlc-node/raea-version.json); an Intel Mac payload is not asked for it.
 // Usage: node scripts/nlc-node/check-payload-tools.cjs <payload-macos-arm64.tar.gz|payload-macos-x64.tar.gz|payload-win-x64.zip> ...
 // Exit 1 and say which entry is missing when a payload has no ffmpeg, ffprobe, whisper-cli or their notices.
 const path = require('node:path');
@@ -14,15 +15,18 @@ function missingTools(file, entries = listEntries(file)) {
   const name = path.basename(file);
   const win = /win/i.test(name);
   const exe = win ? '.exe' : '';
+  const raeaBuilt = win || /arm64/i.test(name);
   const need = [
     new RegExp(`(^|/)ffmpeg/[^/]+/ffmpeg${exe.replace('.', '\\.')}$`),
     new RegExp(`(^|/)ffmpeg/[^/]+/ffprobe${exe.replace('.', '\\.')}$`),
     new RegExp(`(^|/)whisper/[^/]+/whisper-cli${exe.replace('.', '\\.')}$`),
     /(^|\/)NOTICE-ffmpeg\.txt$/,
     /(^|\/)NOTICE-whisper\.txt$/,
+    /(^|\/)raea\/raea\.json$/,
+    /(^|\/)raea\/raea-[^/]+\.(zip|tar\.gz)$/,
   ];
-  const labels = ['ffmpeg', 'ffprobe', 'whisper-cli', 'NOTICE-ffmpeg.txt', 'NOTICE-whisper.txt'];
-  return labels.filter((_, i) => !entries.some((e) => need[i].test(e)));
+  const labels = ['ffmpeg', 'ffprobe', 'whisper-cli', 'NOTICE-ffmpeg.txt', 'NOTICE-whisper.txt', 'raea.json', 'raea archive'];
+  return labels.filter((l, i) => (raeaBuilt || !/^raea/.test(l)) && !entries.some((e) => need[i].test(e)));
 }
 
 module.exports = { missingTools, listEntries };
@@ -33,7 +37,7 @@ if (require.main === module) {
   let bad = 0;
   for (const f of files) {
     const missing = missingTools(f);
-    if (missing.length) { bad += 1; console.error(`NO TOOLS ${path.basename(f)}: missing ${missing.join(', ')}`); } else console.log(`OK ${path.basename(f)} carries ffmpeg, ffprobe, whisper-cli and their notices`);
+    if (missing.length) { bad += 1; console.error(`NO TOOLS ${path.basename(f)}: missing ${missing.join(', ')}`); } else console.log(`OK ${path.basename(f)} carries ffmpeg, ffprobe, whisper-cli, raea (where one is built) and their notices`);
   }
   process.exit(bad ? 1 : 0);
 }
