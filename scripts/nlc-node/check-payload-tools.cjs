@@ -7,6 +7,10 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
 function listEntries(file) {
+  // GNU tar cannot read a zip; on Linux and macOS a zip is listed with unzip, on Windows bsdtar (System32) reads both.
+  if (/\.zip$/i.test(file) && process.platform !== 'win32') {
+    return execFileSync('unzip', ['-Z1', file], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).split(/\r?\n/).filter(Boolean);
+  }
   const tar = process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
   return execFileSync(tar, ['-tf', file], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).split(/\r?\n/).filter(Boolean);
 }
