@@ -127,7 +127,13 @@ function makeNewerBuild(oldPayload, newPayload) {
 }
 function publish(served, file, bytesPath) {
   fs.copyFileSync(bytesPath, path.join(served, `${file}.part`));
-  fs.renameSync(path.join(served, `${file}.part`), path.join(served, file));
+  // On Windows another program (a virus scan, a download that has only just closed) can hold either file for a moment: ask again for a few seconds before giving up.
+  for (let attempt = 0; ; attempt += 1) {
+    try { fs.renameSync(path.join(served, `${file}.part`), path.join(served, file)); break; } catch (error) {
+      if (attempt >= 20 || !['EPERM', 'EBUSY', 'EACCES'].includes(error.code)) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+    }
+  }
   fs.writeFileSync(path.join(served, `${file}.sha256`), `${sha256File(path.join(served, file))}  ${file}\n`);
 }
 
