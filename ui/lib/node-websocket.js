@@ -61,7 +61,7 @@ export function createNodeWebSocketHandler({
 
       ws.send(JSON.stringify({ type: 'node-auth-ok', machineId }));
       installNodeSendGuard(ws);
-      backend.attach(machineId, ws, { version: data.version });
+      backend.attach(machineId, ws, { version: data.version, tools: data.tools });
       // A computer that signed in is told when a different published build of its own payload is on offer.
       if (typeof updateNotice === 'function') {
         Promise.resolve(updateNotice({ platform: data.platform, arch: data.arch, build: data.build, version: data.version }))

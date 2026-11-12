@@ -17,12 +17,29 @@ export const NODE_AGENT_TOOLS = Object.freeze([
   'list', 'stat', 'search', 'read_text', 'write_text', 'edit', 'make_folder', 'rename', 'move', 'copy',
   'delete', 'trash_list', 'trash_restore', 'log_recent',
   'media_info', 'video_trim', 'video_join', 'video_captions', 'video_proxy', 'video_frames', 'audio_mux', 'video_smooth', 'video_check',
-  'video_cut_silence', 'audio_mix_music', 'reel_setup', 'raea_run',
   'captions_from_audio', 'captions_status', 'captions_cancel',
   'job_status', 'job_cancel',
 ]);
 
-const VIDEO_TOOLS = new Set(['media_info', 'video_trim', 'video_join', 'video_captions', 'video_proxy', 'video_frames', 'audio_mux', 'video_smooth', 'video_check', 'video_cut_silence', 'audio_mix_music', 'raea_run']);
+const VIDEO_TOOLS = new Set(['media_info', 'video_trim', 'video_join', 'video_captions', 'video_proxy', 'video_frames', 'audio_mux', 'video_smooth', 'video_check']);
+// Tools a Node reports at sign-in are callable too (with the timeout it reports), so a new Node tool never needs an NLC release.
+// Never callable this way: the pause switch (only the customer's dashboard or the Node window changes it) and the folder chooser.
+const REPORTED_TOOL_NAME = /^[a-z][a-z0-9_]{1,63}$/;
+const NEVER_REPORTED = new Set(['set_paused', 'ask_for_folder', 'computer_status']);
+export const MAX_REPORTED_TOOLS = 200;
+export const MIN_TOOL_TIMEOUT_MS = 1000;
+export const MAX_TOOL_TIMEOUT_MS = 30 * 60_000;
+export function sanitizeReportedTools(list) {
+  const out = new Map();
+  if (!Array.isArray(list)) return out;
+  for (const entry of list.slice(0, MAX_REPORTED_TOOLS)) {
+    const name = typeof entry === 'string' ? entry : entry?.name;
+    if (typeof name !== 'string' || !REPORTED_TOOL_NAME.test(name) || NEVER_REPORTED.has(name)) continue;
+    const t = Number(entry?.timeoutMs);
+    out.set(name, Number.isFinite(t) && t > 0 ? Math.min(MAX_TOOL_TIMEOUT_MS, Math.max(MIN_TOOL_TIMEOUT_MS, Math.floor(t))) : null);
+  }
+  return out;
+}
 export const DEFAULT_TIMEOUT_MS = 30_000;
 export const VIDEO_TIMEOUT_MS = 10 * 60_000;
 export const PREVIOUS_TOKEN_GRACE_MS = 10 * 60 * 1000;
@@ -259,11 +276,11 @@ export function createNodeBackend({
 
   // A new authenticated socket for a machine replaces the old one; commands that were waiting or
   // in flight are sent again on the new line (the Node de-duplicates by command id).
-  function attach(machineId, ws, { version } = {}) {
+  function attach(machineId, ws, { version, tools } = {}) {
     const rec = machines.get(machineId);
     if (!rec) return false;
     const previous = connections.get(machineId);
-    connections.set(machineId, { ws, version });
+    connections.set(machineId, { ws, version, tools: sanitizeReportedTools(tools) });
     liveInfo.set(machineId, { lastSeen: Date.now() });
     rec.lastSeen = Date.now();
     if (version) rec.version = String(version).slice(0, 40);
@@ -274,6 +291,11 @@ export function createNodeBackend({
     }
     for (const p of pending.values()) if (p.machineId === machineId) sendFrame(p);
     return true;
+  }
+
+  // The tools the connected copy of NLC Node reported (name -> its timeout in ms or null). Empty when it is offline or older.
+  function reportedTools(machineId) {
+    return connections.get(machineId)?.tools ?? new Map();
   }
 
   function detach(machineId, ws) {
@@ -328,7 +350,7 @@ export function createNodeBackend({
     if (!connected && !recentlyDropped) return Promise.reject(offline());
     const limit = Number.isFinite(timeoutMs) && timeoutMs > 0
       ? timeoutMs
-      : (VIDEO_TOOLS.has(tool) ? videoTimeoutMs : defaultTimeoutMs);
+      : (VIDEO_TOOLS.has(tool) ? videoTimeoutMs : (connections.get(machineId)?.tools?.get(tool) ?? defaultTimeoutMs));
     return new Promise((resolve, reject) => {
       const id = randomUUID();
       const p = {
@@ -449,7 +471,7 @@ export function createNodeBackend({
   }
 
   return {
-    sendCommand, listMachines, getMachine, setPaused,
+    sendCommand, listMachines, getMachine, setPaused, reportedTools,
     createPairingCode, activePairing, exchangeCode, requestLink, listPending, decideRequest, requestStatus, listAllMachines, authenticate, authenticateToken, refreshToken, removeMachine,
     attach, detach, touch, applyState, handleResponse, close,
   };

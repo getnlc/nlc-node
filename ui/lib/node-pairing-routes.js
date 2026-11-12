@@ -237,12 +237,13 @@ export function registerNodePairingRoutes({
     if (!localOnly(request, response)) return;
     const body = request.body && typeof request.body === 'object' ? request.body : {};
     const tool = String(body.tool ?? '').trim().toLowerCase();
-    if (!NODE_AGENT_TOOLS.includes(tool)) {
-      return response.status(400).json({
-        ok: false,
-        error: { code: 'NOT_FOUND', message: `That tool does not exist. Available tools: ${NODE_AGENT_TOOLS.join(', ')}.` },
-      });
-    }
+    // A tool is callable when it is on the fixed list or when the connected Node reported it at sign-in.
+    const reportedNames = () => backend.listMachines().filter((m) => m.connected).flatMap((m) => [...backend.reportedTools(m.machineId).keys()]);
+    const unknownTool = (reported = []) => response.status(400).json({
+      ok: false,
+      error: { code: 'NOT_FOUND', message: `That tool does not exist. Available tools: ${[...new Set([...NODE_AGENT_TOOLS, ...reported])].join(', ')}.` },
+    });
+    if (!NODE_AGENT_TOOLS.includes(tool) && !reportedNames().includes(tool)) return unknownTool(reportedNames());
     const args = body.args === undefined || body.args === null ? {} : body.args;
     if (typeof args !== 'object' || Array.isArray(args)) {
       return response.status(400).json({ ok: false, error: { code: 'NOT_FOUND', message: 'The arguments must be an object.' } });
@@ -277,6 +278,9 @@ export function registerNodePairingRoutes({
       else {
         return response.json({ ok: false, error: { code: 'OFFLINE', message: OFFLINE_MESSAGE } });
       }
+    }
+    if (!NODE_AGENT_TOOLS.includes(tool) && !backend.reportedTools(target.machineId).has(tool)) {
+      return unknownTool([...backend.reportedTools(target.machineId).keys()]);
     }
     try {
       const result = await backend.sendCommand(target.machineId, tool, args);
