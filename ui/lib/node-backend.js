@@ -17,11 +17,12 @@ export const NODE_AGENT_TOOLS = Object.freeze([
   'list', 'stat', 'search', 'read_text', 'write_text', 'edit', 'make_folder', 'rename', 'move', 'copy',
   'delete', 'trash_list', 'trash_restore', 'log_recent',
   'media_info', 'video_trim', 'video_join', 'video_captions', 'video_proxy', 'video_frames', 'audio_mux', 'video_smooth', 'video_check',
+  'video_cut_silence', 'audio_mix_music', 'reel_setup', 'raea_run',
   'captions_from_audio', 'captions_status', 'captions_cancel',
   'job_status', 'job_cancel',
 ]);
 
-const VIDEO_TOOLS = new Set(['media_info', 'video_trim', 'video_join', 'video_captions', 'video_proxy', 'video_frames', 'audio_mux', 'video_smooth', 'video_check']);
+const VIDEO_TOOLS = new Set(['media_info', 'video_trim', 'video_join', 'video_captions', 'video_proxy', 'video_frames', 'audio_mux', 'video_smooth', 'video_check', 'video_cut_silence', 'audio_mix_music', 'raea_run']);
 export const DEFAULT_TIMEOUT_MS = 30_000;
 export const VIDEO_TIMEOUT_MS = 10 * 60_000;
 export const PREVIOUS_TOKEN_GRACE_MS = 10 * 60 * 1000;
