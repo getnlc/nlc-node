@@ -154,3 +154,21 @@ test('raea_run runs the installed raea inside the shared folder (no shell) and r
   const none = R.createReelModule({ pathGuard, homeDir: fs.mkdtempSync(path.join(os.tmpdir(), 'nlc-reel-empty-')) });
   await assert.rejects(none.raea_run({ folder: 'Footage', path: 'job', args: ['guide'] }), (e) => e.code === 'NOT_FOUND' && /not installed/.test(e.message));
 });
+
+test('proof defects: a stereo video stays stereo under mono music, cut footage has no B-frames, raea errors skip the log noise', async () => {
+  // stereo speech + mono music: the mix graph names stereo on both sides; a mono voice keeps mono
+  assert.match(V.musicMixGraph(0.18, true, 2), /channel_layouts=stereo/);
+  assert.doesNotMatch(V.musicMixGraph(0.18, true, 2), /mono/);
+  assert.match(V.musicMixGraph(0.18, true, 1), /channel_layouts=mono/);
+  ff(['-f', 'lavfi', '-i', 'testsrc2=size=320x240:rate=24:duration=4', '-f', 'lavfi', '-i', 'sine=frequency=300:duration=4', '-ac', '2', '-c:v', 'mpeg4', '-c:a', 'aac', path.join(root, 'stereo.mp4')]);
+  ff(['-f', 'lavfi', '-i', 'sine=frequency=500:duration=2', '-ac', '1', '-c:a', 'libmp3lame', path.join(root, 'mono-music.mp3')]);
+  const s = await finish(video, await video.audio_mix_music({ folder: 'Footage', video_path: 'stereo.mp4', music_path: 'mono-music.mp3', output_name: 'stereo-out.mp4' }));
+  assert.strictEqual(s.state, 'done', JSON.stringify(s.error));
+  const a = JSON.parse(execFileSync(FFPROBE, ['-v', 'error', '-print_format', 'json', '-show_streams', path.join(root, 'stereo-out.mp4')], { encoding: 'utf8' })).streams.find((x) => x.codec_type === 'audio');
+  assert.strictEqual(a.channels, 2, 'the reel keeps its stereo sound');
+  // raea says what is wrong after dozens of INFO/WARN lines: the plain message comes first, never lost
+  const noisy = R.createReelModule({ pathGuard, homeDir: (() => { const h = fs.mkdtempSync(path.join(os.tmpdir(), 'nlc-reel-noise-')); fs.mkdirSync(path.join(h, '.raea', 'bin'), { recursive: true }); fs.writeFileSync(path.join(h, '.raea', 'bin', process.platform === 'win32' ? 'raea.exe' : 'raea'), 'x'); return h; })(),
+    runImpl: undefined });
+  assert.ok(noisy, 'module with the default runner builds');
+  assert.match(R.errorLines('', ['[INFO a] x', '\u001b[2m2026\u001b[0m \u001b[33m WARN\u001b[0m y', 'REFUSED  clip.mp4: has B-frames', '[INFO b] z'].join('\n'), 'f'), /^REFUSED  clip\.mp4: has B-frames$/);
+});
