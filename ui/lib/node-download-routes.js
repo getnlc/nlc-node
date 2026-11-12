@@ -128,6 +128,8 @@ async function sendWindowsZip(response, installerPath, installerName, zipName, o
   });
   response.write(head1);
   const stream = createReadStream(installerPath);
+  // A computer that drops the connection part-way must not leave the installer file held open on this server.
+  response.on('close', () => stream.destroy());
   stream.on('error', () => response.destroy());
   stream.on('end', () => { response.write(Buffer.concat([head2, note, directory, end])); response.end(); });
   stream.pipe(response, { end: false });
@@ -140,6 +142,8 @@ function sendFile(response, path, name, type) {
     'Content-Length': String(stat.size), 'Cache-Control': 'no-store',
   });
   const stream = createReadStream(path);
+  // A computer that drops the connection part-way must not leave the file held open on this server.
+  response.on('close', () => stream.destroy());
   stream.on('error', () => response.destroy());
   stream.pipe(response);
 }
