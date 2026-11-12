@@ -7,7 +7,7 @@ Every file NLC Node's installer downloads has a published SHA-256. The installer
 | File | SHA-256 |
 | --- | --- |
 | installer/nlc-node/one-line/install.sh | `962fd8d2ed9b7521e8dfb28202e1161725aa959f15c8be7fe9f6f0f917f98bc7` |
-| installer/nlc-node/one-line/install.ps1 | `f236c320b706b605bf4ea1dc25b2efc7b0a8c22f2c7c525c110284cdfed435ca` |
+| installer/nlc-node/one-line/install.ps1 | `6282c942de05ac579125fddc70b0105d00af2e06748a81d5af933e7a26eff8ce` |
 
 Your NLC serves the script with its own address filled in, and publishes the SHA-256 of exactly what it served at `<your NLC>/downloads/nlc-node/install.sh.sha256` (and `install.ps1.sha256`).
 

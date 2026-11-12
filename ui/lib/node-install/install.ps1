@@ -53,7 +53,15 @@ function Install-NlcNode {
     Say '1/5  Downloading NLC Node...'
     $zip = Join-Path $Work 'payload.zip'
     try {
-      Invoke-WebRequest -UseBasicParsing -Uri "$Origin/downloads/nlc-node/payload/win-x64.zip" -OutFile $zip
+      $payloadUrl = "$Origin/downloads/nlc-node/payload/win-x64.zip"
+      $curl = Join-Path $env:SystemRoot 'System32\curl.exe'
+      $got = $false
+      if (Test-Path -LiteralPath $curl) {
+        # A connection that crawls (under 200 KB/s for 8 seconds) is dropped and the download carries on from where it was on a fresh one.
+        # Silent and with its messages dropped: a native program's messages must never become a PowerShell error here.
+        try { & $curl -s -L --retry 200 --retry-all-errors --retry-delay 1 --speed-limit 204800 --speed-time 8 -C - -o $zip $payloadUrl 2>$null; $got = ($LASTEXITCODE -eq 0) } catch { $got = $false }
+      }
+      if (-not $got) { Invoke-WebRequest -UseBasicParsing -Uri $payloadUrl -OutFile $zip }
       $shaText = (New-Object Net.WebClient).DownloadString("$Origin/downloads/nlc-node/payload/win-x64.zip.sha256")
     } catch { Fail 'the download did not work. NLC may still be preparing it; please try again in a few minutes.' }
     $want = ($shaText.Trim() -split '\s+')[0].ToLowerInvariant()
