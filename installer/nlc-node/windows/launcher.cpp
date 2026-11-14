@@ -59,12 +59,27 @@ static bool readyRecordMatches(const std::string& record, DWORD processId, const
     && record.find("\"launchId\":\"" + launchId + "\"") != std::string::npos;
 }
 
+// A leftover ready record only counts when its process was started before the record was last written. After a restart Windows
+// reuses process ids, so the same id can belong to an unrelated program that started later.
+static bool processStartedBeforeRecord(DWORD processId) {
+  HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
+  if (process == nullptr) return false;
+  FILETIME created, exited, kernel, user;
+  const bool haveTimes = GetProcessTimes(process, &created, &exited, &kernel, &user) != 0;
+  CloseHandle(process);
+  if (!haveTimes) return false;
+  const std::wstring stateDirectory = localStateDirectory();
+  WIN32_FILE_ATTRIBUTE_DATA info;
+  if (stateDirectory.empty() || !GetFileAttributesExW((stateDirectory + L"\\ready.json").c_str(), GetFileExInfoStandard, &info)) return false;
+  return CompareFileTime(&created, &info.ftLastWriteTime) <= 0;
+}
+
 static bool existingReadyRecordIsLive(const std::string& record) {
   const std::string marker = "\"pid\":";
   const size_t position = record.find(marker);
   if (record.find("\"state\":\"ready\"") == std::string::npos || position == std::string::npos) return false;
   const DWORD processId = static_cast<DWORD>(strtoul(record.c_str() + position + marker.length(), nullptr, 10));
-  return processId > 0 && processIsAlive(processId);
+  return processId > 0 && processIsAlive(processId) && processStartedBeforeRecord(processId);
 }
 
 static bool diagnosticsReportValid(const std::string& report) {
