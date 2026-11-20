@@ -25,7 +25,7 @@ function reply(runtime, sha = SHA) {
 
 // A fake NLC and Central: records every call and hands out installers.
 function world({ status = 200, sha = SHA, agents = ['claude', 'codex'] } = {}) {
-  const calls = { enroll: [], downloads: [], installs: [] };
+  const calls = { enroll: [], downloads: [], installs: [], runs: [] };
   const fetchImpl = async (url, init = {}) => {
     if (String(url).endsWith('/api/node/central/enroll')) {
       calls.enroll.push({ authorization: init.headers.authorization, body: JSON.parse(init.body) });
@@ -41,8 +41,9 @@ function world({ status = 200, sha = SHA, agents = ['claude', 'codex'] } = {}) {
   fs.mkdirSync(path.join(nodeDir, 'central-runtime'), { recursive: true });
   fs.writeFileSync(path.join(nodeDir, 'central-runtime', 'node'), '');
   const run = async (file, args) => {
+    calls.runs.push({ file, args });
     const connectionFile = args[args.indexOf('--connection') + 1];
-    calls.installs.push({ file, installerExists: fs.existsSync(args[0]), connection: JSON.parse(fs.readFileSync(connectionFile, 'utf8')), connectionFile, home: args[args.indexOf('--home') + 1] });
+    calls.installs.push({ file, installerExists: fs.existsSync(args.find(a => a.endsWith('.cjs'))), connection: JSON.parse(fs.readFileSync(connectionFile, 'utf8')), connectionFile, home: args[args.indexOf('--home') + 1] });
     return { ok: true, stdout: '{}' };
   };
   return { calls, fetchImpl, home, nodeDir, run };
@@ -160,4 +161,33 @@ test('the line coming up with an accepted token starts the connection with that 
   while (!seen.length && Date.now() < end) await new Promise(r => setTimeout(r, 5));
   assert.deepEqual(seen, [{ token: 'T_now', machineId: 'm-1' }]);
   await c.stop();
+});
+
+test('a computer with no plain Node program runs the installer inside the Node host itself', async () => {
+  const w = world();
+  fs.rmSync(path.join(w.nodeDir, 'central-runtime', 'node'));
+  const { connect } = make(w, { hostPath: '/apps/NLC Node Host' });
+  assert.equal((await connect.ensure({ origin: ORIGIN, token: 't' })).status, 'connected');
+  assert.ok(w.calls.runs.length === 2 && w.calls.runs.every(r => r.file === '/apps/NLC Node Host' && r.args[0] === '--run-central-installer'));
+});
+
+test('with the shipped plain Node program, that runs the installer', async () => {
+  const w = world();
+  const { connect } = make(w, { hostPath: '/apps/NLC Node Host' });
+  await connect.ensure({ origin: ORIGIN, token: 't' });
+  assert.ok(w.calls.runs.every(r => r.file === path.join(w.nodeDir, 'central-runtime', 'node') && r.args[0] !== '--run-central-installer'));
+});
+
+test('the host runs a Central installer file with --run-central-installer and hands it its own arguments', async () => {
+  const { runAdapterMode } = require('../../lib/nlc-node/central-adapter.cjs');
+  const dir = tmp('hostrun');
+  const out = path.join(dir, 'seen.json');
+  const installer = path.join(dir, 'nlc-central-bootstrap-9.9.9.cjs');
+  fs.writeFileSync(installer, `'use strict';
+const fs = require('node:fs');
+module.exports.main = async (args) => { fs.writeFileSync(${JSON.stringify(out)}, JSON.stringify({ args, isMain: require.main === module })); return { migration: 'complete' }; };
+if (require.main === module) throw new Error('must not start by itself');
+`);
+  assert.equal(await runAdapterMode(['--run-central-installer', installer, '--connection', 'c.json', '--home', '/h'], { stateRoot: dir }), true);
+  assert.deepEqual(JSON.parse(fs.readFileSync(out, 'utf8')), { args: ['--connection', 'c.json', '--home', '/h'], isMain: false });
 });
