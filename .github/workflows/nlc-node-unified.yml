@@ -41,7 +41,7 @@ jobs:
           npm ci --ignore-scripts --no-audit --no-fund
           npm install --prefix ui --no-audit --no-fund --ignore-scripts
       - name: Unit tests (tray window, folders, raea step)
-        run: node --test tests/nlc-node/tray-app.test.cjs tests/nlc-node/raea-install.test.cjs tests/nlc-node/grants-follow.test.cjs tests/nlc-node/grants.test.cjs tests/nlc-node/path-guard.test.cjs tests/nlc-node/dispatcher.test.cjs
+        run: node --test tests/nlc-node/tray-app.test.cjs tests/nlc-node/central-connect.test.cjs tests/nlc-node/raea-install.test.cjs tests/nlc-node/grants-follow.test.cjs tests/nlc-node/grants.test.cjs tests/nlc-node/path-guard.test.cjs tests/nlc-node/dispatcher.test.cjs
       - name: Make a throwaway update key for this test build
         run: |
           node -e "const c=require('crypto');const k=c.generateKeyPairSync('ed25519');console.log('NLC_NODE_UPDATE_PUBLIC_KEY_B64='+k.publicKey.export({format:'der',type:'spki'}).toString('base64'))" >> "${GITHUB_ENV}"
@@ -104,7 +104,7 @@ jobs:
       - name: Unit tests (tray window, raea step; the older folder tests compare 8.3 short temp paths on Windows)
         shell: pwsh
         continue-on-error: true
-        run: node --test tests/nlc-node/tray-app.test.cjs tests/nlc-node/raea-install.test.cjs
+        run: node --test tests/nlc-node/tray-app.test.cjs tests/nlc-node/central-connect.test.cjs tests/nlc-node/raea-install.test.cjs
       - name: Make a throwaway update key for this test build
         shell: pwsh
         run: |
