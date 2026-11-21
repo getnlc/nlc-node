@@ -62,21 +62,21 @@ test('refused with an older token: reloads the newest saved token, retries, stay
   await c.stop();
 });
 
-test('refused with the newest token: pairing ends and the Node asks its NLC again by itself', async () => {
+test('refused with the newest token: the pairing is kept and the Node asks its NLC again by itself', async () => {
   const store = memoryTokenStore(cred('T_bad'));
   const nlc = fakeNlc(new Set(['T_allowed']));
   const c = createConnection({ origin: 'http://nlc.test', tokenStore: store, dispatcher, WebSocketImpl: nlc.FakeSocket, fetchImpl: nlc.fetchImpl, autoRequest: true, askEveryMs: 20, keepaliveMs: 60000 });
   await c.start();
   await until(() => nlc.seen.requests >= 1, 'a link request after the refusal');
   assert.equal(c.status(), 'disconnected', 'the window keeps saying Disconnected while it asks in the background');
-  assert.equal(store.calls.clears, 1, 'a refused newest token is cleared');
+  assert.equal(store.calls.clears, 0, 'a refused newest token alone no longer wipes the pairing (HF-2026-11-21-19)');
   nlc.seen.allow = true; // the owner presses Allow
   await until(() => c.status() === 'connected', 'connected after Allow');
   assert.equal(store.peek().token, 'T_allowed');
   await c.stop();
 });
 
-test('refused newest token without autoRequest: ends the pairing and does not ask', async () => {
+test('refused newest token without autoRequest: says disconnected and does not ask', async () => {
   const store = memoryTokenStore(cred('T_bad'));
   const nlc = fakeNlc(new Set());
   const c = createConnection({ origin: 'http://nlc.test', tokenStore: store, dispatcher, WebSocketImpl: nlc.FakeSocket, fetchImpl: nlc.fetchImpl, autoRequest: false, keepaliveMs: 60000 });
