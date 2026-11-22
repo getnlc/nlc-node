@@ -7,7 +7,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { createCentralConnect, findDesktopAgents, checkInstaller } = require('../../lib/nlc-node/central-connect.cjs');
+const { createCentralConnect, findDesktopAgents, findCodexExecutable, checkInstaller } = require('../../lib/nlc-node/central-connect.cjs');
 const { createConnection } = require('../../lib/nlc-node/connection.cjs');
 
 const ORIGIN = 'https://nlc.test';
@@ -236,4 +236,39 @@ test('a successful install keeps no errors', async () => {
   const { connect, stateRoot } = make(w);
   await connect.ensure({ origin: ORIGIN, token: 't' });
   assert.equal(JSON.parse(fs.readFileSync(path.join(stateRoot, 'central-connect.json'), 'utf8')).errors, undefined);
+});
+
+// REPA-2026-11-22-21: a clean computer has the Codex app but no `codex` on its PATH, so the Node must hand the installer the
+// app's own command line tool; without it the installer fails with "Codex native configuration writer unavailable".
+test('Windows clean computer: the Codex app is found and its newest codex.exe is passed to the installer', () => {
+  const local = path.join(tmp('winlocal'), 'AppData', 'Local');
+  const bin = path.join(local, 'OpenAI', 'Codex', 'bin');
+  const old = path.join(bin, 'old1111', 'codex.exe'), fresh = path.join(bin, 'new2222', 'codex.exe');
+  for (const f of [old, fresh]) { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, ''); }
+  fs.utimesSync(old, new Date(2026, 0, 1), new Date(2026, 0, 1));
+  const home = tmp('winhome'), env = { LOCALAPPDATA: local };
+  assert.equal(findDesktopAgents({ homeDir: home, platform: 'win32', env }).codex, true, 'the app alone (no ~/.codex yet) counts as present');
+  assert.equal(findCodexExecutable({ homeDir: home, platform: 'win32', env }), fresh);
+  assert.equal(findCodexExecutable({ homeDir: home, platform: 'win32', env: { LOCALAPPDATA: path.join(home, 'none') } }), '', 'no app, nothing passed');
+  assert.equal(findCodexExecutable({ homeDir: home, platform: 'win32', env: { NLC_CODEX_EXECUTABLE: 'X:/c.exe', LOCALAPPDATA: local } }), 'X:/c.exe');
+});
+
+test('Mac clean computer: the codex tool inside Codex.app is found', () => {
+  const inApp = path.join('/Applications/Codex.app', 'Contents/Resources', 'codex');
+  assert.equal(findCodexExecutable({ homeDir: '/Users/x', platform: 'darwin', env: {}, exists: (p) => p === inApp }), inApp);
+  assert.equal(findCodexExecutable({ homeDir: '/Users/x', platform: 'darwin', env: {}, exists: () => false }), '');
+});
+
+test('the Codex installer run on a clean Windows computer receives --codex-executable', async () => {
+  const w = world({ agents: [] });
+  const local = path.join(tmp('winlocal2'), 'AppData', 'Local');
+  const exe = path.join(local, 'OpenAI', 'Codex', 'bin', 'abc123', 'codex.exe');
+  fs.mkdirSync(path.dirname(exe), { recursive: true }); fs.writeFileSync(exe, '');
+  const { connect } = make(w, { platform: 'win32', env: { LOCALAPPDATA: local } });
+  fs.mkdirSync(path.join(w.nodeDir, 'central-runtime'), { recursive: true });
+  fs.writeFileSync(path.join(w.nodeDir, 'central-runtime', 'node.exe'), '');
+  const out = await connect.ensure({ origin: ORIGIN, token: 't' });
+  assert.equal(out.status, 'connected');
+  const args = w.calls.runs[0].args;
+  assert.equal(args[args.indexOf('--codex-executable') + 1], exe);
 });
