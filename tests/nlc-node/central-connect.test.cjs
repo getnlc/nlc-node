@@ -191,3 +191,49 @@ if (require.main === module) throw new Error('must not start by itself');
   assert.equal(await runAdapterMode(['--run-central-installer', installer, '--connection', 'c.json', '--home', '/h'], { stateRoot: dir }), true);
   assert.deepEqual(JSON.parse(fs.readFileSync(out, 'utf8')), { args: ['--connection', 'c.json', '--home', '/h'], isMain: false });
 });
+
+// HF-2026-11-20-36: the installer's own error is kept in central-connect.json, not only the word installer_failed.
+test('a failed installer: its own error message is kept in central-connect.json beside installer_failed', async () => {
+  const w = world();
+  const failing = async () => ({ ok: false, stdout: '', stderr: 'NLC Central installer failed: Normal NLC Central OAuth MCP entry is required before installing NLC Node\n', error: 'Command failed: node installer' });
+  const { connect, stateRoot } = make(w, { run: failing });
+  const out = await connect.ensure({ origin: ORIGIN, token: 't' });
+  assert.equal(out.status, 'install_failed');
+  const state = JSON.parse(fs.readFileSync(path.join(stateRoot, 'central-connect.json'), 'utf8'));
+  assert.deepEqual(state.runtimes, { claude: 'installer_failed', codex: 'installer_failed' });
+  for (const runtime of ['claude', 'codex']) assert.match(state.errors[runtime], /Normal NLC Central OAuth MCP entry is required before installing NLC Node/);
+});
+
+test('a failed installer that only wrote to stdout, or only timed out, or said nothing, still names its cause', async () => {
+  const cases = [
+    [{ ok: false, stdout: 'line one\nthe real reason', stderr: '' }, /the real reason/],
+    [{ ok: false, stdout: '', stderr: '', killed: true, error: 'Command failed' }, /did not finish within 240 seconds/],
+    [{ ok: false, stdout: '', stderr: '', error: 'Command failed: node x\nspawn EACCES' }, /spawn EACCES/],
+    [{ ok: false, stdout: '', stderr: '' }, /said nothing/],
+  ];
+  for (const [outcome, expected] of cases) {
+    const w = world({ agents: ['claude'] });
+    const { connect, stateRoot } = make(w, { run: async () => outcome });
+    await connect.ensure({ origin: ORIGIN, token: 't' });
+    const state = JSON.parse(fs.readFileSync(path.join(stateRoot, 'central-connect.json'), 'utf8'));
+    assert.match(state.errors.claude, expected);
+  }
+});
+
+test('the kept installer message never carries a token and is short', async () => {
+  const w = world({ agents: ['claude'] });
+  const secret = 'A'.repeat(60);
+  const noisy = async () => ({ ok: false, stdout: '', stderr: `failed Authorization: Bearer ${secret} and token=abc123 then ${secret} ` + 'x '.repeat(600) });
+  const { connect, stateRoot } = make(w, { run: noisy });
+  await connect.ensure({ origin: ORIGIN, token: 't' });
+  const raw = fs.readFileSync(path.join(stateRoot, 'central-connect.json'), 'utf8');
+  assert.ok(!raw.includes(secret) && !raw.includes('abc123'));
+  assert.ok(JSON.parse(raw).errors.claude.length <= 505);
+});
+
+test('a successful install keeps no errors', async () => {
+  const w = world();
+  const { connect, stateRoot } = make(w);
+  await connect.ensure({ origin: ORIGIN, token: 't' });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(stateRoot, 'central-connect.json'), 'utf8')).errors, undefined);
+});
