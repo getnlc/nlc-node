@@ -272,3 +272,62 @@ test('the Codex installer run on a clean Windows computer receives --codex-execu
   const args = w.calls.runs[0].args;
   assert.equal(args[args.indexOf('--codex-executable') + 1], exe);
 });
+
+// REPA-2026-11-22-23: a computer that already holds a working Central connection to another installation keeps it; the Node's
+// update never turns that into a failure that retries forever ("Existing installation identity differs; refusing to replace it").
+function putCredential(home, agent, fields) {
+  const file = path.join(home, '.' + agent, 'nlc-central-v2', 'credentials', 'nlc-central-installation.json');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ runtimeInstallationToken: 'old-' + agent, runtimeExchangeUrl: 'https://central.test/runtime/event', localPrincipalDigest: DIGEST, ...fields }));
+  return file;
+}
+
+test('REPA-23: an agent already connected to a different installation is kept as it is and is not a failure', async () => {
+  const w = world();
+  const before = putCredential(w.home, 'claude', { runtimeExchangeUrl: 'https://other.test/runtime/event', localPrincipalDigest: 'b'.repeat(64), sourceId: 'source_other' });
+  const bytes = fs.readFileSync(before, 'utf8');
+  const { connect, stateRoot } = make(w);
+  const out = await connect.ensure({ origin: ORIGIN, token: 't' });
+  assert.equal(out.status, 'connected');
+  assert.equal(out.runtimes.claude, 'kept_existing');
+  assert.equal(out.runtimes.codex, 'ok');
+  assert.equal(w.calls.installs.length, 1, 'the installer ran only for codex');
+  assert.equal(fs.readFileSync(before, 'utf8'), bytes, 'the existing connection was not touched');
+  const state = JSON.parse(fs.readFileSync(path.join(stateRoot, 'central-connect.json'), 'utf8'));
+  assert.equal(state.failedAt, undefined);
+  assert.equal(state.status, undefined);
+  assert.equal((await connect.ensure({ origin: ORIGIN, token: 't' })).status, 'current', 'nothing is retried on the same build');
+  assert.equal(w.calls.enroll.length, 1);
+});
+
+test('REPA-23: every agent kept: connected, no installer run, nothing retried', async () => {
+  const w = world();
+  for (const a of ['claude', 'codex']) putCredential(w.home, a, { runtimeExchangeUrl: 'https://other.test/runtime/event', sourceId: 'source_other' });
+  const { connect } = make(w);
+  assert.equal((await connect.ensure({ origin: ORIGIN, token: 't' })).status, 'connected');
+  assert.equal(w.calls.installs.length, 0);
+  assert.equal((await connect.ensure({ origin: ORIGIN, token: 't' })).status, 'current');
+});
+
+test('REPA-23: the same installation with a rotated token is still replaced by the fresh setup (a self-update reconnects)', async () => {
+  const w = world();
+  const sourceReply = (runtime) => ({ ...reply(runtime), sourceId: 'source_same' });
+  const fetchImpl = async (url, init) => {
+    if (String(url).endsWith('/api/node/central/enroll')) return { ok: true, status: 200, json: async () => ({ ok: true, setup: { claude: sourceReply('claude'), codex: sourceReply('codex') } }) };
+    return w.fetchImpl(url, init);
+  };
+  for (const a of ['claude', 'codex']) putCredential(w.home, a, { sourceId: 'source_same' });
+  const { connect } = make({ ...w, fetchImpl });
+  const out = await connect.ensure({ origin: ORIGIN, token: 't' });
+  assert.deepEqual(out.runtimes, { claude: 'ok', codex: 'ok' });
+  assert.equal(w.calls.installs.length, 2);
+});
+
+test('REPA-23: a credential that is not the same installation and gives no way to tell is kept too (the installer would refuse it)', async () => {
+  const w = world();
+  putCredential(w.home, 'codex', {});
+  const { connect } = make(w);
+  const out = await connect.ensure({ origin: ORIGIN, token: 't' });
+  assert.equal(out.runtimes.codex, 'kept_existing');
+  assert.equal(out.runtimes.claude, 'ok');
+});
